@@ -1,0 +1,340 @@
+# User API Endpoints
+
+This document provides an overview of the API endpoints available to regular users.
+
+## User Authentication
+
+### `POST /api/v1/auth/register`
+- **Description:** Registers a new user.
+- **Request DTO:** `CreateUserRequest`
+  - `fullName` (String, not blank)
+  - `email` (String, valid email)
+  - `password` (String, min 8 characters)
+  - `confirmPassword` (String)
+  - `phoneNumber` (String, valid phone number)
+- **Sample Request:**
+  ```json
+  {
+    "fullName": "John Doe",
+    "email": "john.doe@example.com",
+    "password": "password123",
+    "confirmPassword": "password123",
+    "phoneNumber": "+1234567890"
+  }
+  ```
+- **Response DTO:** `ApiResponse<UserResponse>`
+  - `UserResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `phoneNumber` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `token` (String)
+    - `refreshToken` (String)
+- **Sample Response:**
+  ```json
+  {
+    "status": "success",
+    "message": "User registered successfully",
+    "data": {
+      "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      "fullName": "John Doe",
+      "email": "john.doe@example.com",
+      "phoneNumber": "+1234567890",
+      "role": "USER",
+      "createdAt": "2023-01-01T12:00:00Z",
+      "token": "ey...",
+      "refreshToken": "ey..."
+    }
+  }
+  ```
+
+### `POST /api/v1/auth/login`
+- **Description:** Logs in a user.
+- **Request DTO:** `LoginRequest`
+  - `email` (String, valid email)
+  - `password` (String)
+- **Sample Request:**
+  ```json
+  {
+    "email": "john.doe@example.com",
+    "password": "password123"
+  }
+  ```
+- **Response DTO:** `ApiResponse<LoginResponse>`
+  - `LoginResponse`:
+    - `token` (String)
+    - `refreshToken` (String)
+    - `userId` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `role` (Role)
+- **Sample Response:**
+  ```json
+  {
+    "status": "success",
+    "message": "Login successful",
+    "data": {
+      "token": "ey...",
+      "refreshToken": "ey...",
+      "userId": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      "fullName": "John Doe",
+      "email": "john.doe@example.com",
+      "role": "USER"
+    }
+  }
+  ```
+
+## User Profile
+
+### `GET /api/v1/users/me`
+- **Description:** Returns the authenticated user's profile.
+- **Response DTO:** `ApiResponse<UserResponse>`
+  - `UserResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `phoneNumber` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `token` (String)
+    - `refreshToken` (String)
+
+### `PATCH /api/v1/users/me`
+- **Description:** Updates the authenticated user's profile.
+- **Request DTO:** `UpdateUserRequest`
+  - `fullName` (String)
+  - `email` (String, valid email)
+  - `phoneNumber` (String, valid phone number)
+  - `currentPassword` (String)
+  - `newPassword` (String, min 8 characters)
+  - `confirmNewPassword` (String)
+- **Sample Request:**
+  ```json
+  {
+    "fullName": "Johnathan Doe"
+  }
+  ```
+- **Response DTO:** `ApiResponse<UserResponse>`
+  - `UserResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `phoneNumber` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `token` (String)
+    - `refreshToken` (String)
+
+## Payment
+
+### `POST /api/v1/payment/initiate`
+- **Description:** Initiates a payment for VIP subscription.
+- **Response DTO:** `ApiResponse<InitiatePaymentResponse>`
+  - `InitiatePaymentResponse`:
+    - `reference` (String)
+    - `authorizationUrl` (String)
+    - `accessCode` (String)
+    - `amount` (Double)
+    - `currency` (String)
+    - `email` (String)
+
+### `GET /api/v1/payment/verify/{reference}`
+- **Description:** Verifies a payment after the user completes the transaction.
+- **Path Variable:** `reference` (String)
+- **Response DTO:** `ApiResponse<PaymentVerificationResponse>`
+  - `PaymentVerificationResponse`:
+    - `reference` (String)
+    - `status` (String: "success", "failed")
+    - `amount` (Double)
+    - `currency` (String)
+    - `message` (String)
+    - `vipActivated` (boolean)
+    - `vipExpiresAt` (LocalDateTime)
+
+### `GET /api/v1/payment/vip/status`
+- **Description:** Checks the user's VIP status and expiry time.
+- **Response DTO:** `ApiResponse<Map<String, Object>>`
+
+### `GET /api/v1/payment/history`
+- **Description:** Retrieves the user's payment history.
+- **Response DTO:** `ApiResponse<List<PaymentHistoryResponse>>`
+  - `PaymentHistoryResponse`:
+    - `id` (UUID)
+    - `reference` (String)
+    - `amount` (Double)
+    - `currency` (String)
+    - `status` (PaymentStatus)
+    - `purpose` (PaymentPurpose)
+    - `channel` (String)
+    - `paidAt` (LocalDateTime)
+    - `createdAt` (LocalDateTime)
+
+### `GET /api/v1/payment/vip/price`
+- **Description:** Retrieves the current VIP price.
+- **Response DTO:** `ApiResponse<Map<String, Object>>`
+
+## Public Game Endpoints
+
+### `GET /api/v1/public/games/today`
+- **Description:** Retrieves a preview of today's games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/public/games/live`
+- **Description:** Retrieves a preview of live games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/public/games/starting-soon`
+- **Description:** Retrieves a preview of games starting soon.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/public/games/slips`
+- **Description:** Retrieves a preview of free betting slips.
+- **Response DTO:** `ApiResponse<List<BettingSlipResponse>>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+## Registered User Game Endpoints
+
+### `GET /api/v1/games/today`
+- **Description:** Retrieves all published free games for today.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/live`
+- **Description:** Retrieves all live published free games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/featured`
+- **Description:** Retrieves featured free games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/featured/free`
+- **Description:** Retrieves featured games that are explicitly free.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/upcoming`
+- **Description:** Retrieves all upcoming published free games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/league`
+- **Description:** Retrieves games by league.
+- **Query Param:** `league` (String)
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/{id}`
+- **Description:** Retrieves a single game by ID.
+- **Path Variable:** `id` (UUID)
+- **Response DTO:** `ApiResponse<GameResponse>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/games/slips/free`
+- **Description:** Retrieves all published free betting slips.
+- **Response DTO:** `ApiResponse<List<BettingSlipResponse>>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+## VIP Game Endpoints
+
+### `GET /api/v1/vip/games/today`
+- **Description:** Retrieves all today's games, including VIP-only.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/live`
+- **Description:** Retrieves all live games, including VIP-only.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/live/vip-only`
+- **Description:** Retrieves live games that are exclusively VIP.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/upcoming`
+- **Description:** Retrieves upcoming VIP-only games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/featured`
+- **Description:** Retrieves featured VIP games.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/league`
+- **Description:** Retrieves VIP games by league.
+- **Query Param:** `league` (String)
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/slips`
+- **Description:** Retrieves all VIP-tier betting slips.
+- **Response DTO:** `ApiResponse<List<BettingSlipResponse>>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/slips/bookmaker`
+- **Description:** Retrieves VIP betting slips by bookmaker.
+- **Query Param:** `bookmaker` (String)
+- **Response DTO:** `ApiResponse<List<BettingSlipResponse>>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `GET /api/v1/vip/games/match/{externalFixtureId}/details`
+- **Description:** Retrieves detailed match information.
+- **Path Variable:** `externalFixtureId` (String)
+- **Response DTO:** `ApiResponse<MatchDetailsResponse>`
+  - `MatchDetailsResponse`:
+    - `fixtureId` (String)
+    - `fixture` (String)
+    - `events` (String)
+    - `lineups` (String)
+    - `statistics` (String)
+
+## Common DTOs
+
+### `GameResponse`
+- `id` (UUID)
+- `externalFixtureId` (String)
+- `homeTeam` (String)
+- `awayTeam` (String)
+- `league` (String)
+- `country` (String)
+- `leagueLogo` (String)
+- `homeLogo` (String)
+- `awayLogo` (String)
+- `kickoffTime` (LocalDateTime)
+- `homeScore` (Integer)
+- `awayScore` (Integer)
+- `elapsedMinutes` (Integer)
+- `matchPeriod` (String)
+- `status` (GameStatus)
+- `published` (boolean)
+- `featured` (boolean)
+- `homeWinOdds` (Double)
+- `drawOdds` (Double)
+- `awayWinOdds` (Double)
+- `over25Odds` (Double)
+- `under25Odds` (Double)
+- `over15Odds` (Double)
+- `over35Odds` (Double)
+- `oddsBookmaker` (String)
+- `vipOnly` (boolean)
+
+### `BettingSlipResponse`
+- `id` (UUID)
+- `bookmaker` (String)
+- `bookingCode` (String)
+- `description` (String)
+- `totalOdds` (Double)
+- `imageUrl` (String)
+- `type` (PredictionType)
+- `status` (SlipStatus)
+- `published` (boolean)
+- `validUntil` (LocalDateTime)
+- `createdAt` (LocalDateTime)

@@ -1,0 +1,463 @@
+# Admin API Endpoints
+
+This document provides an overview of the API endpoints available to admin users.
+
+## Admin Authentication
+
+### `POST /api/v1/admin/create`
+- **Description:** Creates a new admin user.
+- **Request DTO:** `CreateAdminRequest`
+  - `fullName` (String, not blank)
+  - `email` (String, valid email)
+  - `password` (String, min 8 characters)
+  - `confirmPassword` (String)
+- **Sample Request:**
+  ```json
+  {
+    "fullName": "Admin User",
+    "email": "admin@example.com",
+    "password": "adminpassword",
+    "confirmPassword": "adminpassword"
+  }
+  ```
+- **Response DTO:** `ApiResponse<AdminLoginResponse>`
+  - `AdminLoginResponse`:
+    - `adminId` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `role` (Role)
+    - `token` (String)
+    - `refreshToken` (String)
+
+### `POST /api/v1/admin/login`
+- **Description:** Logs in an admin user.
+- **Request DTO:** `AdminLoginRequest`
+  - `email` (String, valid email)
+  - `password` (String)
+- **Sample Request:**
+  ```json
+  {
+    "email": "admin@example.com",
+    "password": "adminpassword"
+  }
+  ```
+- **Response DTO:** `ApiResponse<AdminLoginResponse>`
+  - `AdminLoginResponse`:
+    - `adminId` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `role` (Role)
+    - `token` (String)
+    - `refreshToken` (String)
+
+## Admin Profile
+
+### `GET /api/v1/admin/me`
+- **Description:** Returns the authenticated admin's profile.
+- **Response DTO:** `ApiResponse<AdminResponse>`
+  - `AdminResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `updatedAt` (LocalDateTime)
+
+### `PATCH /api/v1/admin/me`
+- **Description:** Updates the authenticated admin's profile.
+- **Request DTO:** `UpdateAdminRequest`
+  - `fullName` (String)
+  - `email` (String, valid email)
+  - `currentPassword` (String)
+  - `newPassword` (String, min 8 characters)
+  - `confirmNewPassword` (String)
+- **Response DTO:** `ApiResponse<AdminResponse>`
+  - `AdminResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `updatedAt` (LocalDateTime)
+
+## Admin User Management
+
+### `GET /api/v1/admin/users`
+- **Description:** Retrieves a list of all users.
+- **Response DTO:** `ApiResponse<List<UserSummaryResponse>>`
+  - `UserSummaryResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `phoneNumber` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `lastLogin` (LocalDateTime)
+
+### `GET /api/v1/admin/users/{userId}`
+- **Description:** Retrieves details for a specific user.
+- **Path Variable:** `userId` (UUID)
+- **Response DTO:** `ApiResponse<UserSummaryResponse>`
+  - `UserSummaryResponse`:
+    - `id` (UUID)
+    - `fullName` (String)
+    - `email` (String)
+    - `phoneNumber` (String)
+    - `role` (Role)
+    - `createdAt` (LocalDateTime)
+    - `lastLogin` (LocalDateTime)
+
+## Admin Game Management
+
+### `GET /api/v1/admin/games/today`
+- **Description:** Retrieves today's games for admin.
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `GET /api/v1/admin/games/stats`
+- **Description:** Retrieves game statistics.
+- **Response DTO:** `ApiResponse<GameStatsResponse>`
+  - `GameStatsResponse`:
+    - `totalGames` (long)
+    - `publishedGames` (long)
+    - `vipOnlyGames` (long)
+    - `upcomingGames` (long)
+    - `liveGames` (long)
+    - `finishedGames` (long)
+
+### `GET /api/v1/admin/games/{gameId}/details`
+- **Description:** Retrieves match details for a game.
+- **Query Param:** `externalFixtureId` (String)
+- **Response DTO:** `ApiResponse<MatchDetailsResponse>`
+  - `MatchDetailsResponse`:
+    - `fixtureId` (String)
+    - `fixture` (String)
+    - `events` (String)
+    - `lineups` (String)
+    - `statistics` (String)
+
+### `POST /api/v1/admin/games/book`
+- **Description:** Books a single game.
+- **Request DTO:** `BookGameRequest`
+  - `gameId` (UUID)
+  - `published` (boolean)
+  - `featured` (boolean)
+  - `vipOnly` (boolean)
+  - `homeWinOdds` (Double)
+  - `drawOdds` (Double)
+  - `awayWinOdds` (Double)
+  - `over25Odds` (Double)
+  - `under25Odds` (Double)
+  - `over15Odds` (Double)
+  - `over35Odds` (Double)
+- **Response DTO:** `ApiResponse<GameResponse>`
+  - `GameResponse`: (see Common DTOs)
+
+### `POST /api/v1/admin/games/book/bulk`
+- **Description:** Books multiple games at once.
+- **Request DTO:** `BulkBookGamesRequest`
+  - `gameIds` (List<UUID>)
+  - `published` (boolean)
+  - `vipOnly` (boolean)
+- **Response DTO:** `ApiResponse<List<GameResponse>>`
+  - `GameResponse`: (see Common DTOs)
+
+### `PATCH /api/v1/admin/games/{gameId}/unpublish`
+- **Description:** Unpublishes a game.
+- **Path Variable:** `gameId` (UUID)
+- **Response DTO:** `ApiResponse<GameResponse>`
+  - `GameResponse`: (see Common DTOs)
+
+### `PATCH /api/v1/admin/games/{gameId}/toggle-featured`
+- **Description:** Toggles the featured status of a game.
+- **Path Variable:** `gameId` (UUID)
+- **Response DTO:** `ApiResponse<GameResponse>`
+  - `GameResponse`: (see Common DTOs)
+
+### `PATCH /api/v1/admin/games/{gameId}/toggle-vip`
+- **Description:** Toggles the VIP status of a game.
+- **Path Variable:** `gameId` (UUID)
+- **Response DTO:** `ApiResponse<GameResponse>`
+  - `GameResponse`: (see Common DTOs)
+
+## Admin Betting Slip Management
+
+### `POST /api/v1/admin/games/slips`
+- **Description:** Creates a betting slip.
+- **Request DTO:** `CreateBettingSlipRequest` (multipart/form-data)
+  - `gameId` (UUID)
+  - `bookmaker` (String)
+  - `bookingCode` (String)
+  - `description` (String)
+  - `totalOdds` (Double)
+  - `type` (PredictionType)
+  - `validUntil` (LocalDateTime)
+  - `published` (boolean)
+  - `image` (MultipartFile)
+- **Response DTO:** `ApiResponse<BettingSlipResponse>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `POST /api/v1/admin/games/slips/{slipId}/image`
+- **Description:** Uploads an image for a betting slip.
+- **Path Variable:** `slipId` (UUID)
+- **Request Part:** `image` (MultipartFile)
+- **Response DTO:** `ApiResponse<BettingSlipResponse>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `PATCH /api/v1/admin/games/slips/{slipId}/status`
+- **Description:** Updates the status of a betting slip.
+- **Path Variable:** `slipId` (UUID)
+- **Request DTO:** `UpdateSlipStatusRequest`
+  - `status` (SlipStatus)
+- **Response DTO:** `ApiResponse<BettingSlipResponse>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `PATCH /api/v1/admin/games/slips/{slipId}/toggle-publish`
+- **Description:** Toggles the published status of a betting slip.
+- **Path Variable:** `slipId` (UUID)
+- **Response DTO:** `ApiResponse<BettingSlipResponse>`
+  - `BettingSlipResponse`: (see Common DTOs)
+
+### `DELETE /api/v1/admin/games/slips/{slipId}`
+- **Description:** Deletes a betting slip.
+- **Path Variable:** `slipId` (UUID)
+- **Response DTO:** `ApiResponse<Void>`
+
+## Admin Dashboard
+
+### `POST /api/v1/admin/vip/price`
+- **Description:** Sets the VIP subscription price.
+- **Request DTO:** `SetVipPriceRequest`
+  - `price` (Double)
+  - `currency` (String)
+  - `description` (String)
+- **Response DTO:** `ApiResponse<VipPriceResponse>`
+  - `VipPriceResponse`:
+    - `id` (UUID)
+    - `price` (Double)
+    - `currency` (String)
+    - `description` (String)
+
+### `GET /api/v1/admin/vip/price`
+- **Description:** Retrieves the current VIP price.
+- **Response DTO:** `ApiResponse<VipPriceResponse>`
+  - `VipPriceResponse`:
+    - `id` (UUID)
+    - `price` (Double)
+    - `currency` (String)
+    - `description` (String)
+
+### `POST /api/v1/admin/promos`
+- **Description:** Creates a new promotion.
+- **Request DTO:** `CreatePromoRequest` (multipart/form-data)
+  - `title` (String)
+  - `description` (String)
+  - `type` (PromoType)
+  - `discountPercent` (Double)
+  - `startsAt` (LocalDateTime)
+  - `expiresAt` (LocalDateTime)
+  - `image` (MultipartFile)
+- **Response DTO:** `ApiResponse<PromoResponse>`
+  - `PromoResponse`:
+    - `id` (UUID)
+    - `title` (String)
+    - `description` (String)
+    - `imageUrl` (String)
+    - `type` (PromoType)
+    - `discountPercent` (Double)
+    - `startsAt` (LocalDateTime)
+    - `expiresAt` (LocalDateTime)
+    - `active` (boolean)
+
+### `GET /api/v1/admin/promos`
+- **Description:** Retrieves all active promotions.
+- **Response DTO:** `ApiResponse<List<PromoResponse>>`
+  - `PromoResponse`: (see above)
+
+### `DELETE /api/v1/admin/promos/{id}`
+- **Description:** Deletes a promotion.
+- **Path Variable:** `id` (UUID)
+- **Response DTO:** `ApiResponse<Void>`
+
+### `GET /api/v1/admin/stats`
+- **Description:** Retrieves dashboard statistics.
+- **Response DTO:** `ApiResponse<DashboardStatsResponse>`
+  - `DashboardStatsResponse`:
+    - `totalUsers` (long)
+    - `activeVipUsers` (long)
+    - `totalPredictions` (long)
+    - `wonPredictions` (long)
+    - `lostPredictions` (long)
+    - `winRate` (double)
+    - `totalGamesPosted` (long)
+    - `activeFreeSlips` (long)
+    - `activeVipSlips` (long)
+
+## Analytics
+
+### `GET /api/v1/analytics/match`
+- **Description:** Runs AI-powered analysis for a specific fixture.
+- **Query Params:** `fixtureId`, `homeTeamId`, `awayTeamId`, `leagueId`, `season` (all int)
+- **Response DTO:** `ApiResponse<MatchAnalyticsResponse>`
+  - `MatchAnalyticsResponse`:
+    - `fixtureId` (int)
+    - `homeWinRate` (double)
+    - `awayWinRate` (double)
+    - `drawRate` (double)
+    - `homeAvgGoalsScored` (double)
+    - `awayAvgGoalsScored` (double)
+    - `homeAvgGoalsConceded` (double)
+    - `awayAvgGoalsConceded` (double)
+    - `bttsRate` (double)
+    - `over25Rate` (double)
+    - `predictedOutcome` (String)
+    - `confidencePercent` (double)
+    - `suggestedTip` (String)
+    - `riskLevel` (String)
+
+## Odds Data
+
+### `GET /api/v1/admin/odds/sports`
+- **Description:** Retrieves all sports currently in season.
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/sport`
+- **Description:** Retrieves H2H + totals odds for a sport.
+- **Query Params:** `sportKey` (String), `region` (String, default: "uk")
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/sport/full`
+- **Description:** Retrieves H2H + spreads + totals odds for a sport.
+- **Query Params:** `sportKey` (String), `region` (String, default: "uk")
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/event/{eventId}`
+- **Description:** Retrieves odds for a specific event.
+- **Path Variable:** `eventId` (String)
+- **Query Params:** `sportKey` (String), `region` (String, default: "uk")
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/events`
+- **Description:** Retrieves upcoming events for a sport.
+- **Query Param:** `sportKey` (String)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/scores/live`
+- **Description:** Retrieves live scores for a sport.
+- **Query Param:** `sportKey` (String)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/scores`
+- **Description:** Retrieves recent + live scores.
+- **Query Params:** `sportKey` (String), `daysFrom` (int, default: 1)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/admin/odds/event/{eventId}/markets`
+- **Description:** Retrieves all available markets for a specific event.
+- **Path Variable:** `eventId` (String)
+- **Query Params:** `sportKey` (String), `region` (String, default: "uk")
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+## Football Data
+
+### `GET /api/v1/football/fixtures/today`
+- **Description:** Retrieves all matches scheduled or in play today.
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/fixtures/date`
+- **Description:** Retrieves fixtures for a specific date, league, and season.
+- **Query Params:** `date` (String), `leagueId` (int), `season` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/fixtures/range`
+- **Description:** Retrieves all matches across a date range.
+- **Query Params:** `dateFrom` (String), `dateTo` (String)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/fixtures/{fixtureId}`
+- **Description:** Retrieves a single fixture by ID.
+- **Path Variable:** `fixtureId` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/live`
+- **Description:** Retrieves all currently live / in-play fixtures.
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/standings`
+- **Description:** Retrieves league table / standings.
+- **Query Params:** `leagueId` (int), `season` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/scorers`
+- **Description:** Retrieves top scorers for a competition and season.
+- **Query Params:** `leagueId` (int), `season` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/teams/{teamId}/matches/recent`
+- **Description:** Retrieves last N finished matches for a team.
+- **Path Variable:** `teamId` (int)
+- **Query Param:** `count` (int, default: 10)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/teams/{teamId}/matches/upcoming`
+- **Description:** Retrieves upcoming scheduled matches for a team.
+- **Path Variable:** `teamId` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/teams/{teamId}/stats`
+- **Description:** Retrieves season stats for a team in a given competition.
+- **Path Variable:** `teamId` (int)
+- **Query Params:** `leagueId` (int), `season` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/h2h/{matchId}`
+- **Description:** Retrieves head-to-head history for a given match ID.
+- **Path Variable:** `matchId` (int)
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+### `GET /api/v1/football/competitions`
+- **Description:** Retrieves all active / subscribed competitions.
+- **Response DTO:** `ApiResponse<JsonNode>`
+
+## Common DTOs
+
+### `GameResponse`
+- `id` (UUID)
+- `externalFixtureId` (String)
+- `homeTeam` (String)
+- `awayTeam` (String)
+- `league` (String)
+- `country` (String)
+- `leagueLogo` (String)
+- `homeLogo` (String)
+- `awayLogo` (String)
+- `kickoffTime` (LocalDateTime)
+- `homeScore` (Integer)
+- `awayScore` (Integer)
+- `elapsedMinutes` (Integer)
+- `matchPeriod` (String)
+- `status` (GameStatus)
+- `published` (boolean)
+- `featured` (boolean)
+- `homeWinOdds` (Double)
+- `drawOdds` (Double)
+- `awayWinOdds` (Double)
+- `over25Odds` (Double)
+- `under25Odds` (Double)
+- `over15Odds` (Double)
+- `over35Odds` (Double)
+- `oddsBookmaker` (String)
+- `vipOnly` (boolean)
+
+### `BettingSlipResponse`
+- `id` (UUID)
+- `bookmaker` (String)
+- `bookingCode` (String)
+- `description` (String)
+- `totalOdds` (Double)
+- `imageUrl` (String)
+- `type` (PredictionType)
+- `status` (SlipStatus)
+- `published` (boolean)
+- `validUntil` (LocalDateTime)
+- `createdAt` (LocalDateTime)
