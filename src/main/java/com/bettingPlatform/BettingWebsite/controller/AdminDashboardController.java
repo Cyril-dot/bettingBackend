@@ -2,6 +2,7 @@ package com.bettingPlatform.BettingWebsite.controller;
 
 import com.bettingPlatform.BettingWebsite.dto.*;
 import com.bettingPlatform.BettingWebsite.service.AdminDashboardService;
+import com.bettingPlatform.BettingWebsite.service.CurrencyConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -22,10 +23,15 @@ import java.util.UUID;
  * All endpoints require ADMIN role.
  * Structured logging is provided via SLF4J (@Slf4j / Logback).
  *
- * Logging convention used throughout:
+ * Logging convention:
  *   INFO  – normal operation milestones
  *   WARN  – recoverable anomalies (bad input, not-found, etc.)
  *   ERROR – unexpected failures that need attention
+ *
+ * VIP Price note:
+ *   The admin sets the price in ANY supported currency (USD, GHS, NGN, EUR, GBP).
+ *   At payment time, PaystackService automatically converts it to each user's
+ *   local currency using live exchange rates (detected from the user's IP address).
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -36,13 +42,35 @@ public class AdminDashboardController {
 
     private final AdminDashboardService adminDashboardService;
 
+
     // ─────────────────────────────────────────────────────────────────────────
     // VIP Price
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * POST /api/v1/admin/vip/price
+     *
      * Set (or replace) the active VIP subscription price.
+     * The price can be set in ANY supported currency — USD, GHS, NGN, EUR, or GBP.
+     * Users will automatically be charged in their own local currency at payment time.
+     *
+     * Request body:
+     * {
+     *   "price": 10.00,
+     *   "currency": "USD",
+     *   "description": "24-hour VIP access — unlimited predictions"
+     * }
+     *
+     * Supported currencies: USD · GHS · NGN · EUR · GBP
+     * (See CurrencyConverter.SUPPORTED_BASE_CURRENCIES)
+     *
+     * Response:
+     * {
+     *   "id": "...",
+     *   "price": 10.00,
+     *   "currency": "USD",
+     *   "description": "24-hour VIP access — unlimited predictions"
+     * }
      */
     @PostMapping("/vip/price")
     public ResponseEntity<ApiResponse<VipPriceResponse>> setVipPrice(
@@ -61,6 +89,14 @@ public class AdminDashboardController {
                     .status(HttpStatus.CREATED)
                     .body(ApiResponse.success("VIP price updated", response));
 
+        } catch (RuntimeException e) {
+            // Handles unsupported currency, zero price, etc.
+            log.warn("[ADMIN][VIP] Invalid VIP price request → amount={} currency={} reason={}",
+                    request.getPrice(), request.getCurrency(), e.getMessage());
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+
         } catch (Exception e) {
             log.error("[ADMIN][VIP] Failed to set VIP price → reason={}", e.getMessage(), e);
             return ResponseEntity
@@ -71,7 +107,10 @@ public class AdminDashboardController {
 
     /**
      * GET /api/v1/admin/vip/price
-     * Retrieve the currently active VIP price.
+     *
+     * Retrieve the currently active VIP price as the admin set it (raw — no conversion).
+     * For the user-facing price (with live currency conversion), use:
+     *   GET /api/v1/payment/vip/price
      */
     @GetMapping("/vip/price")
     public ResponseEntity<ApiResponse<VipPriceResponse>> getCurrentVipPrice() {
@@ -99,6 +138,32 @@ public class AdminDashboardController {
                     .body(ApiResponse.error("Failed to fetch VIP price"));
         }
     }
+
+    /**
+     * GET /api/v1/admin/vip/currencies
+     *
+     * Returns the list of currencies the admin is allowed to set the price in.
+     * Useful for populating the currency dropdown in the admin UI.
+     *
+     * Response:
+     * {
+     *   "supportedCurrencies": ["USD", "GHS", "NGN", "EUR", "GBP"],
+     *   "paystackCurrencies":  ["GHS", "NGN", "USD"]
+     * }
+     */
+    @GetMapping("/vip/currencies")
+    public ResponseEntity<ApiResponse<Object>> getSupportedCurrencies() {
+
+        log.info("[ADMIN][VIP] Supported currencies requested");
+
+        return ResponseEntity.ok(ApiResponse.success("Supported currencies",
+                java.util.Map.of(
+                        "supportedBaseCurrencies", CurrencyConverter.SUPPORTED_BASE_CURRENCIES,
+                        "paystackPaymentCurrencies", com.bettingPlatform.BettingWebsite
+                                .service.IpCurrencyResolver.PAYSTACK_CURRENCIES
+                )));
+    }
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // Promos
@@ -149,7 +214,7 @@ public class AdminDashboardController {
 
     /**
      * GET /api/v1/admin/promos
-     * List all currently active promotions.
+     * List all currently active promotions (not expired).
      */
     @GetMapping("/promos")
     public ResponseEntity<ApiResponse<List<PromoResponse>>> getActivePromos() {

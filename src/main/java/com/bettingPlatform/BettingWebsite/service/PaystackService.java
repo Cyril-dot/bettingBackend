@@ -13,8 +13,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +25,8 @@ public class PaystackService {
     private final VipPriceRepo         vipPriceRepo;
     private final VipSubscriptionRepo  vipSubscriptionRepo;
     private final RestTemplate         restTemplate;
+    private final CurrencyConverter    currencyConverter;    // ← live conversion
+    private final IpCurrencyResolver   ipCurrencyResolver;  // ← IP → currency
 
     @Value("${paystack.secret.key}")
     private String paystackSecretKey;
@@ -37,99 +37,108 @@ public class PaystackService {
     @Value("${paystack.callback.url}")
     private String callbackUrl;
 
-    // ── Exchange rate constants ───────────────────────────────────
-    private static final String GHS = "GHS";
-    private static final String NGN = "NGN";
 
-    // Free exchange rate API — no key required
-    private static final String EXCHANGE_RATE_URL =
-            "https://open.er-api.com/v6/latest/GHS";
+    // ════════════════════════════════════════════════════════════════
+    // STEP 1 — User initiates payment
+    //
+    // Flow:
+    //   1. Detect user's currency from IP (auto) or manual override
+    //   2. Load admin's base price (any currency, e.g. USD)
+    //   3. Convert base price → user's currency using live rates
+    //   4. Initialize Paystack transaction
+    //   5. Save Payment record and return authorization URL
+    // ════════════════════════════════════════════════════════════════
 
-    // Fallback rate used if the live API is unreachable
-    private static final double FALLBACK_GHS_TO_NGN = 45.0;
-
-    // ── Simple in-memory cache (rate + timestamp) ─────────────────
-    // Caches for 1 hour so we don't hammer the free API on every payment
-    private static final long   CACHE_TTL_MS     = 60 * 60 * 1000L; // 1 hour
-    private final AtomicReference<Double> cachedRate      = new AtomicReference<>(null);
-    private final AtomicLong              cacheTimestamp   = new AtomicLong(0);
-
-
-    // ── STEP 1: User initiates payment ───────────────────────────
-    // currency: "GHS" or "NGN" — sent by frontend based on user's selection
+    /**
+     * @param userPrincipal  authenticated user
+     * @param clientIp       raw IP extracted from the HTTP request (from controller)
+     * @param currencyOverride  optional manual currency override from frontend (nullable)
+     *                          Must be "GHS", "NGN", or "USD" — ignored if invalid
+     */
     public InitiatePaymentResponse initiatePayment(UserPrincipal userPrincipal,
-                                                   String currency) {
+                                                   String clientIp,
+                                                   String currencyOverride) {
 
-        // Normalise — default to GHS if invalid
-        String selectedCurrency = NGN.equalsIgnoreCase(currency) ? NGN : GHS;
+        // ── 1. Resolve user's currency (IP auto-detect + optional override) ──
+        String userCurrency = ipCurrencyResolver
+                .resolveCurrencyWithOverride(clientIp, currencyOverride);
 
+        log.info("💳 Payment init — IP: {}, detected currency: {}, override: {}",
+                clientIp, userCurrency, currencyOverride);
+
+        // ── 2. Load user ──────────────────────────────────────────────────────
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         // Block if already VIP
         vipSubscriptionRepo.findByUserAndActiveTrue(user).ifPresent(sub -> {
             throw new RuntimeException(
-                    "You already have an active VIP subscription expiring at "
-                            + sub.getExpiresAt());
+                    "You already have an active VIP subscription expiring at " + sub.getExpiresAt());
         });
 
-        // Base price always stored in GHS
+        // ── 3. Load admin price + convert to user's currency ──────────────────
         VipPrice vipPrice = vipPriceRepo.findByActiveTrue()
                 .orElseThrow(() -> new RuntimeException("VIP price not configured yet"));
 
-        double baseAmountGhs = vipPrice.getPrice();
+        double baseAmount    = vipPrice.getPrice();       // e.g. 10.00
+        String baseCurrency  = vipPrice.getCurrency();    // e.g. "USD"
 
-        // Get live rate and convert
-        double liveRate     = fetchLiveGhsToNgnRate();
-        double chargeAmount = convertAmount(baseAmountGhs, selectedCurrency, liveRate);
+        // Live cross-conversion: USD → GHS / NGN / USD
+        double chargeAmount  = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
+        double displayRate   = currencyConverter.getRate(baseCurrency, userCurrency);
 
-        // Paystack expects amount in smallest unit (pesewas / kobo)
-        int amountInSmallestUnit = (int) Math.round(chargeAmount * 100);
+        // Paystack expects the amount in the smallest unit (pesewas / kobo / cents)
+        int amountSmallestUnit = (int) Math.round(chargeAmount * 100);
 
+        log.info("💱 Price conversion: {} {} → {} {}  (rate: 1 {} = {} {})",
+                baseAmount, baseCurrency,
+                chargeAmount, userCurrency,
+                baseCurrency, displayRate, userCurrency);
+
+        // ── 4. Build reference + Paystack payload ─────────────────────────────
         String reference = "VIP_" + UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 16).toUpperCase();
 
         Map<String, Object> paystackBody = new HashMap<>();
         paystackBody.put("email",        user.getEmail());
-        paystackBody.put("amount",       amountInSmallestUnit);
-        paystackBody.put("currency",     selectedCurrency);
+        paystackBody.put("amount",       amountSmallestUnit);
+        paystackBody.put("currency",     userCurrency);
         paystackBody.put("reference",    reference);
         paystackBody.put("callback_url", callbackUrl);
         paystackBody.put("metadata", Map.of(
                 "userId",           user.getId().toString(),
                 "purpose",          "VIP_SUBSCRIPTION",
                 "userName",         user.getFullName(),
-                "baseCurrency",     GHS,
-                "baseAmount",       baseAmountGhs,
-                "selectedCurrency", selectedCurrency,
+                "baseCurrency",     baseCurrency,
+                "baseAmount",       baseAmount,
+                "userCurrency",     userCurrency,
                 "chargeAmount",     chargeAmount,
-                "exchangeRate",     liveRate
+                "exchangeRate",     displayRate,
+                "clientIp",         clientIp != null ? clientIp : "unknown"
         ));
 
         HttpHeaders headers = buildHeaders();
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(paystackBody, headers);
 
+        // ── 5. Call Paystack + save Payment record ────────────────────────────
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(
-                    paystackBaseUrl + "/transaction/initialize",
-                    entity,
-                    Map.class);
+                    paystackBaseUrl + "/transaction/initialize", entity, Map.class);
 
             Map responseBody = response.getBody();
             if (responseBody == null || !(Boolean) responseBody.get("status")) {
                 throw new RuntimeException("Paystack initialization failed");
             }
 
-            Map<String, Object> data    = (Map<String, Object>) responseBody.get("data");
-            String authorizationUrl     = (String) data.get("authorization_url");
-            String accessCode           = (String) data.get("access_code");
+            Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
+            String authorizationUrl  = (String) data.get("authorization_url");
+            String accessCode        = (String) data.get("access_code");
 
-            // Save payment with actual charge currency + amount
             Payment payment = Payment.builder()
                     .user(user)
                     .reference(reference)
                     .amount(chargeAmount)
-                    .currency(selectedCurrency)
+                    .currency(userCurrency)
                     .email(user.getEmail())
                     .purpose(PaymentPurpose.VIP_SUBSCRIPTION)
                     .status(PaymentStatus.PENDING)
@@ -139,32 +148,36 @@ public class PaystackService {
 
             paymentRepo.save(payment);
 
-            log.info("💳 Payment initiated — User: {}, Ref: {}, Charge: {} {} " +
-                            "(base: {} GHS, live rate: 1 GHS = {} NGN)",
+            log.info("✅ Payment initialized — User: {}, Ref: {}, Charge: {} {} " +
+                            "(base: {} {}, rate: 1 {} = {} {})",
                     user.getEmail(), reference,
-                    chargeAmount, selectedCurrency,
-                    baseAmountGhs, liveRate);
+                    chargeAmount, userCurrency,
+                    baseAmount, baseCurrency,
+                    baseCurrency, displayRate, userCurrency);
 
             return InitiatePaymentResponse.builder()
                     .reference(reference)
                     .authorizationUrl(authorizationUrl)
                     .accessCode(accessCode)
                     .amount(chargeAmount)
-                    .currency(selectedCurrency)
+                    .currency(userCurrency)
                     .email(user.getEmail())
                     .build();
 
         } catch (Exception e) {
             log.error("❌ Paystack init failed: {}", e.getMessage());
-            throw new RuntimeException("Payment initialization failed. Try again.");
+            throw new RuntimeException("Payment initialization failed. Please try again.");
         }
     }
 
 
-    // ── STEP 2: Verify payment after redirect ────────────────────
+    // ════════════════════════════════════════════════════════════════
+    // STEP 2 — Verify payment after Paystack redirects user back
+    // ════════════════════════════════════════════════════════════════
+
     public PaymentVerificationResponse verifyPayment(String reference) {
 
-        // Already verified — return cached result
+        // Idempotency: already verified — return cached result
         Optional<Payment> existingOpt = paymentRepo.findByReference(reference);
         if (existingOpt.isPresent()
                 && existingOpt.get().getStatus() == PaymentStatus.SUCCESS) {
@@ -183,21 +196,18 @@ public class PaystackService {
         }
 
         Payment payment = paymentRepo.findByReference(reference)
-                .orElseThrow(() -> new RuntimeException("Payment not found"));
+                .orElseThrow(() -> new RuntimeException("Payment record not found: " + reference));
 
-        HttpHeaders headers = buildHeaders();
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        HttpEntity<Void> entity = new HttpEntity<>(buildHeaders());
 
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
                     paystackBaseUrl + "/transaction/verify/" + reference,
-                    HttpMethod.GET,
-                    entity,
-                    Map.class);
+                    HttpMethod.GET, entity, Map.class);
 
             Map responseBody = response.getBody();
             if (responseBody == null || !(Boolean) responseBody.get("status")) {
-                throw new RuntimeException("Paystack verification failed");
+                throw new RuntimeException("Paystack verification call failed");
             }
 
             Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
@@ -248,17 +258,20 @@ public class PaystackService {
             }
 
         } catch (Exception e) {
-            log.error("❌ Verification error for {}: {}", reference, e.getMessage());
+            log.error("❌ Verification error for ref {}: {}", reference, e.getMessage());
             throw new RuntimeException("Payment verification failed. Contact support.");
         }
     }
 
 
-    // ── STEP 3: Paystack Webhook ──────────────────────────────────
+    // ════════════════════════════════════════════════════════════════
+    // STEP 3 — Paystack Webhook (charge.success)
+    // ════════════════════════════════════════════════════════════════
+
     public void handleWebhook(Map<String, Object> payload, String signature) {
         if (!isValidSignature(payload, signature)) {
-            log.warn("⚠️ Invalid Paystack webhook signature");
-            throw new RuntimeException("Invalid signature");
+            log.warn("⚠️ Invalid Paystack webhook signature — rejecting");
+            throw new RuntimeException("Invalid webhook signature");
         }
 
         String event = (String) payload.get("event");
@@ -268,8 +281,9 @@ public class PaystackService {
             Map<String, Object> data = (Map<String, Object>) payload.get("data");
             String reference = (String) data.get("reference");
 
+            // Idempotency check
             if (paymentRepo.existsByReferenceAndStatus(reference, PaymentStatus.SUCCESS)) {
-                log.info("⏩ Webhook: {} already processed", reference);
+                log.info("⏩ Webhook: {} already processed — skipping", reference);
                 return;
             }
 
@@ -277,32 +291,69 @@ public class PaystackService {
                 verifyPayment(reference);
                 log.info("✅ Webhook processed for reference: {}", reference);
             } catch (Exception e) {
-                log.error("❌ Webhook processing failed: {}", e.getMessage());
+                log.error("❌ Webhook processing failed for ref {}: {}", reference, e.getMessage());
             }
         }
     }
 
 
-    // ── VIP Activation ────────────────────────────────────────────
-    private LocalDateTime activateVip(User user) {
-        LocalDateTime now       = LocalDateTime.now();
-        LocalDateTime expiresAt = now.plusHours(24);
+    // ════════════════════════════════════════════════════════════════
+    // PUBLIC QUERIES
+    // ════════════════════════════════════════════════════════════════
 
-        VipSubscription subscription = vipSubscriptionRepo
-                .findByUserAndActiveTrue(user)
-                .orElse(VipSubscription.builder().user(user).build());
+    /**
+     * Returns the VIP price converted to the user's local currency (detected from IP).
+     * Also returns all three Paystack options so the frontend can show a currency switcher.
+     *
+     * @param clientIp        user's real IP (from controller via ipCurrencyResolver.extractIp)
+     * @param currencyOverride optional manual override ("GHS", "NGN", "USD")
+     */
+    public Map<String, Object> getVipPriceForUser(String clientIp, String currencyOverride) {
+        VipPrice price = vipPriceRepo.findByActiveTrue()
+                .orElseThrow(() -> new RuntimeException("VIP price not configured"));
 
-        subscription.setActivatedAt(now);
-        subscription.setExpiresAt(expiresAt);
-        subscription.setActive(true);
-        vipSubscriptionRepo.save(subscription);
+        double baseAmount   = price.getPrice();
+        String baseCurrency = price.getCurrency();
 
-        log.info("👑 VIP activated for {} — expires: {}", user.getEmail(), expiresAt);
-        return expiresAt;
+        // Detect user's currency
+        String userCurrency = ipCurrencyResolver
+                .resolveCurrencyWithOverride(clientIp, currencyOverride);
+
+        double userPrice    = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
+        double displayRate  = currencyConverter.getRate(baseCurrency, userCurrency);
+
+        // Pre-compute all three Paystack currency options
+        List<Map<String, Object>> options = IpCurrencyResolver.PAYSTACK_CURRENCIES
+                .stream()
+                .map(cur -> {
+                    double converted = currencyConverter.convert(baseAmount, baseCurrency, cur);
+                    return (Map<String, Object>) new HashMap<String, Object>(Map.of(
+                            "currency", cur,
+                            "price",    converted,
+                            "label",    currencyLabel(cur),
+                            "selected", cur.equals(userCurrency)
+                    ));
+                })
+                .collect(Collectors.toList());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("baseCurrency",  baseCurrency);          // admin's currency, e.g. "USD"
+        result.put("basePrice",     baseAmount);             // admin's price, e.g. 10.00
+        result.put("userCurrency",  userCurrency);           // auto-detected, e.g. "GHS"
+        result.put("userPrice",     userPrice);              // converted price for user
+        result.put("exchangeRate",  displayRate);            // 1 baseCurrency = X userCurrency
+        result.put("description",   price.getDescription());
+        result.put("options",       options);                // all three currency options
+
+        log.info("💰 VIP price served — IP: {}, currency: {}, price: {} {}",
+                clientIp, userCurrency, userPrice, userCurrency);
+
+        return result;
     }
 
-
-    // ── Get VIP status ────────────────────────────────────────────
+    /**
+     * Returns the current user's VIP subscription status.
+     */
     public Map<String, Object> getVipStatus(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -320,44 +371,18 @@ public class PaystackService {
             status.put("hoursRemaining", Math.max(hoursLeft, 0));
         });
 
-        vipPriceRepo.findByActiveTrue().ifPresent(price -> {
-            status.put("price",       price.getPrice());
-            status.put("currency",    price.getCurrency());
-            status.put("description", price.getDescription());
+        vipPriceRepo.findByActiveTrue().ifPresent(p -> {
+            status.put("basePrice",    p.getPrice());
+            status.put("baseCurrency", p.getCurrency());
+            status.put("description",  p.getDescription());
         });
 
         return status;
     }
 
-
-    // ── Get VIP price in both currencies (with live rate) ─────────
-    // Frontend calls this to show both GHS and NGN options to the user
-    public Map<String, Object> getVipPrice() {
-        VipPrice price = vipPriceRepo.findByActiveTrue()
-                .orElseThrow(() -> new RuntimeException("VIP price not configured"));
-
-        double ghsPrice  = price.getPrice();
-        double liveRate  = fetchLiveGhsToNgnRate();
-        double ngnPrice  = convertAmount(ghsPrice, NGN, liveRate);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("baseCurrency", GHS);
-        result.put("basePrice",    ghsPrice);
-        result.put("description",  price.getDescription());
-        result.put("exchangeRate", liveRate);
-        result.put("rateSource",   "live");
-
-        // Both options for the frontend to render
-        result.put("options", List.of(
-                Map.of("currency", GHS, "price", ghsPrice, "label", "Pay in Ghana Cedis (GHS)"),
-                Map.of("currency", NGN, "price", ngnPrice, "label", "Pay in Nigerian Naira (NGN)")
-        ));
-
-        return result;
-    }
-
-
-    // ── Get payment history ───────────────────────────────────────
+    /**
+     * Returns the authenticated user's payment history.
+     */
     public List<PaymentHistoryResponse> getPaymentHistory(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -369,79 +394,29 @@ public class PaystackService {
     }
 
 
-    // ══════════════════════════════════════════════════════════════
-    // EXCHANGE RATE — live fetch with 1-hour cache + fallback
-    // ══════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // PRIVATE HELPERS
+    // ════════════════════════════════════════════════════════════════
 
     /**
-     * Fetches the live GHS → NGN rate from open.er-api.com.
-     * - Caches the result for 1 hour to avoid hammering the free API.
-     * - Falls back to FALLBACK_GHS_TO_NGN (45.0) if the API is unreachable.
-     * - No API key required for open.er-api.com free tier.
+     * Activates (or renews) the user's VIP for 24 hours.
      */
-    @SuppressWarnings("unchecked")
-    private double fetchLiveGhsToNgnRate() {
-        long now = System.currentTimeMillis();
+    private LocalDateTime activateVip(User user) {
+        LocalDateTime now       = LocalDateTime.now();
+        LocalDateTime expiresAt = now.plusHours(24);
 
-        // Return cached rate if still fresh
-        Double cached = cachedRate.get();
-        if (cached != null && (now - cacheTimestamp.get()) < CACHE_TTL_MS) {
-            log.debug("💱 Using cached GHS→NGN rate: {}", cached);
-            return cached;
-        }
+        VipSubscription subscription = vipSubscriptionRepo
+                .findByUserAndActiveTrue(user)
+                .orElse(VipSubscription.builder().user(user).build());
 
-        try {
-            ResponseEntity<Map> response = restTemplate.getForEntity(
-                    EXCHANGE_RATE_URL, Map.class);
+        subscription.setActivatedAt(now);
+        subscription.setExpiresAt(expiresAt);
+        subscription.setActive(true);
+        vipSubscriptionRepo.save(subscription);
 
-            Map body = response.getBody();
-            if (body == null || !"success".equals(body.get("result"))) {
-                log.warn("⚠️ Exchange rate API returned non-success — using fallback rate {}",
-                        FALLBACK_GHS_TO_NGN);
-                return FALLBACK_GHS_TO_NGN;
-            }
-
-            Map<String, Object> rates = (Map<String, Object>) body.get("rates");
-            Object ngnRateObj = rates.get("NGN");
-
-            if (ngnRateObj == null) {
-                log.warn("⚠️ NGN not found in exchange rate response — using fallback {}",
-                        FALLBACK_GHS_TO_NGN);
-                return FALLBACK_GHS_TO_NGN;
-            }
-
-            double liveRate = ((Number) ngnRateObj).doubleValue();
-
-            // Cache it
-            cachedRate.set(liveRate);
-            cacheTimestamp.set(now);
-
-            log.info("💱 Live exchange rate fetched: 1 GHS = {} NGN", liveRate);
-            return liveRate;
-
-        } catch (Exception e) {
-            log.warn("⚠️ Failed to fetch live exchange rate: {} — using fallback {}",
-                    e.getMessage(), FALLBACK_GHS_TO_NGN);
-            return FALLBACK_GHS_TO_NGN;
-        }
+        log.info("👑 VIP activated for {} — expires at {}", user.getEmail(), expiresAt);
+        return expiresAt;
     }
-
-    /**
-     * Converts a GHS amount to the target currency using the provided rate.
-     * GHS → GHS: no change.
-     * GHS → NGN: multiply by rate.
-     */
-    private double convertAmount(double ghsAmount, String targetCurrency, double rate) {
-        if (NGN.equalsIgnoreCase(targetCurrency)) {
-            double converted = Math.round(ghsAmount * rate * 100.0) / 100.0;
-            log.debug("💱 {} GHS × {} = {} NGN", ghsAmount, rate, converted);
-            return converted;
-        }
-        return ghsAmount;
-    }
-
-
-    // ── HELPERS ───────────────────────────────────────────────────
 
     private HttpHeaders buildHeaders() {
         HttpHeaders headers = new HttpHeaders();
@@ -461,14 +436,22 @@ public class PaystackService {
 
             byte[] hashBytes = mac.doFinal(payloadString.getBytes());
             StringBuilder hexHash = new StringBuilder();
-            for (byte b : hashBytes) {
-                hexHash.append(String.format("%02x", b));
-            }
+            for (byte b : hashBytes) hexHash.append(String.format("%02x", b));
+
             return hexHash.toString().equals(signature);
         } catch (Exception e) {
             log.error("❌ Signature validation error: {}", e.getMessage());
             return false;
         }
+    }
+
+    private String currencyLabel(String currency) {
+        return switch (currency) {
+            case "GHS" -> "Pay in Ghana Cedis (GHS)";
+            case "NGN" -> "Pay in Nigerian Naira (NGN)";
+            case "USD" -> "Pay in US Dollars (USD)";
+            default    -> "Pay in " + currency;
+        };
     }
 
     private PaymentHistoryResponse mapPayment(Payment p) {
