@@ -2798,3 +2798,301 @@ Caused by: java.lang.StringIndexOutOfBoundsException: Index 3 out of bounds for 
 	at com.bettingPlatform.BettingWebsite.Config.Security.TokenEncryptionService.hexStringToByteArray(TokenEncryptionService.java:124)
 	at com.bettingPlatform.BettingWebsite.Config.Security.TokenEncryptionService.hexToSecretKey(TokenEncryptionService.java:108)
 	... 110 common frames omitted
+2026-03-14 16:42:05 [main] INFO  c.b.B.BettingWebsiteApplication - Starting BettingWebsiteApplication using Java 21.0.8 with PID 8780 (C:\Users\lenovo\Documents\MEGA\BettingWebsite\target\classes started by lenovo in C:\Users\lenovo\Documents\MEGA\BettingWebsite)
+2026-03-14 16:42:05 [main] INFO  c.b.B.BettingWebsiteApplication - No active profile set, falling back to 1 default profile: "default"
+2026-03-14 16:42:07 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-03-14 16:42:07 [main] INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 265 ms. Found 13 JPA repository interfaces.
+2026-03-14 16:42:08 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-03-14 16:42:08 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-03-14 16:42:08 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/11.0.18]
+2026-03-14 16:42:09 [main] INFO  o.s.b.w.c.s.WebApplicationContextInitializer - Root WebApplicationContext: initialization completed in 3311 ms
+2026-03-14 16:42:09 [main] INFO  org.hibernate.orm.jpa - HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-03-14 16:42:09 [main] INFO  org.hibernate.orm.core - HHH000001: Hibernate ORM core version 7.2.4.Final
+2026-03-14 16:42:10 [main] INFO  o.s.o.j.p.SpringPersistenceUnitInfo - No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-03-14 16:42:10 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-03-14 16:42:11 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@da11873
+2026-03-14 16:42:11 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-03-14 16:42:11 [main] INFO  o.hibernate.orm.connections.pooling - HHH10001005: Database info:
+	Database JDBC URL [jdbc:postgresql://localhost:5432/bettingSite?currentSchema=public]
+	Database driver: PostgreSQL JDBC Driver
+	Database dialect: PostgreSQLDialect
+	Database version: 18.1
+	Default catalog/schema: bettingSite/public
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-03-14 16:42:14 [main] INFO  org.hibernate.orm.core - HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-03-14 16:42:14 [main] INFO  o.s.o.j.LocalContainerEntityManagerFactoryBean - Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-03-14 16:42:14 [main] INFO  o.s.d.j.r.q.QueryEnhancerFactories - Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-03-14 16:42:16 [main] INFO  c.b.B.C.S.TokenEncryptionService - ✅ Token encryption service initialized
+2026-03-14 16:42:16 [main] INFO  c.b.B.C.S.R.RateLimitingService - ✅ Rate limiting initialized — Capacity: 100 requests per 60s
+2026-03-14 16:42:17 [main] INFO  o.s.b.web.servlet.RegistrationBean - Filter jwtFilterRegistration was not registered (disabled)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.C.S.PingController:
+	{GET [/ping]}: ping()
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.AdminController:
+	{POST [/api/v1/admin/login]}: login(AdminLoginRequest)
+	{POST [/api/v1/admin/create]}: createAdmin(CreateAdminRequest)
+	{GET [/api/v1/admin/users/{userId}]}: getUserDetails(AdminPrincipal,UUID)
+	{GET [/api/v1/admin/users]}: getAllUsers(AdminPrincipal)
+	{PATCH [/api/v1/admin/me]}: updateAdmin(AdminPrincipal,UpdateAdminRequest)
+	{GET [/api/v1/admin/me]}: getAdminDetails(AdminPrincipal)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.AdminDashboardController:
+	{GET [/api/v1/admin/promos]}: getActivePromos()
+	{POST [/api/v1/admin/promos], consumes [multipart/form-data]}: createPromo(CreatePromoRequest,MultipartFile)
+	{POST [/api/v1/admin/vip/price]}: setVipPrice(SetVipPriceRequest)
+	{GET [/api/v1/admin/stats]}: getDashboardStats()
+	{DELETE [/api/v1/admin/promos/{id}]}: deletePromo(UUID)
+	{GET [/api/v1/admin/vip/price]}: getCurrentVipPrice()
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.AdminGameController:
+	{GET [/api/v1/admin/games/day-after-tomorrow]}: getDayAfterTomorrowGames(AdminPrincipal)
+	{GET [/api/v1/admin/games/today]}: getTodayGames(AdminPrincipal)
+	{PATCH [/api/v1/admin/games/{gameId}/unpublish]}: unpublishGame(AdminPrincipal,UUID)
+	{GET [/api/v1/admin/games/by-date]}: getGamesByDate(AdminPrincipal,LocalDate)
+	{GET [/api/v1/admin/games/{gameId}/details]}: getMatchDetails(AdminPrincipal,String)
+	{GET [/api/v1/admin/games/tomorrow]}: getTomorrowGames(AdminPrincipal)
+	{GET [/api/v1/admin/games/next-week]}: getNextWeekGames(AdminPrincipal)
+	{POST [/api/v1/admin/games/book/bulk]}: bookMultipleGames(AdminPrincipal,BulkBookGamesRequest)
+	{PATCH [/api/v1/admin/games/{gameId}/toggle-featured]}: toggleFeatured(AdminPrincipal,UUID)
+	{GET [/api/v1/admin/games/stats]}: getGameStats(AdminPrincipal)
+	{GET [/api/v1/admin/games/ws-info]}: getWebSocketInfo(AdminPrincipal)
+	{POST [/api/v1/admin/games/slips/{slipId}/image], consumes [multipart/form-data]}: uploadSlipImage(AdminPrincipal,UUID,MultipartFile)
+	{POST [/api/v1/admin/games/live/refresh]}: refreshLiveScores(AdminPrincipal)
+	{POST [/api/v1/admin/games/fixtures/refresh]}: refreshFixtures(AdminPrincipal)
+	{PATCH [/api/v1/admin/games/slips/bulk-settle]}: bulkAutoSettle(AdminPrincipal)
+	{PATCH [/api/v1/admin/games/slips/{slipId}/status]}: updateSlipStatus(AdminPrincipal,UUID,UpdateSlipStatusRequest)
+	{PATCH [/api/v1/admin/games/{gameId}/toggle-vip]}: toggleVipOnly(AdminPrincipal,UUID)
+	{PATCH [/api/v1/admin/games/slips/{slipId}/toggle-publish]}: toggleSlipPublish(AdminPrincipal,UUID)
+	{PATCH [/api/v1/admin/games/slips/{slipId}/auto-settle]}: autoSettleSlip(AdminPrincipal,UUID)
+	{GET [/api/v1/admin/games/slips]}: getAllSlips(AdminPrincipal)
+	{POST [/api/v1/admin/games/book]}: bookGame(AdminPrincipal,BookGameRequest)
+	{POST [/api/v1/admin/games/slips], consumes [multipart/form-data]}: createSlip(AdminPrincipal,CreateBettingSlipRequest,MultipartFile)
+	{GET [/api/v1/admin/games/slips/{slipId}]}: getSlip(AdminPrincipal,UUID)
+	{PUT [/api/v1/admin/games/slips/{slipId}], consumes [multipart/form-data]}: updateSlip(AdminPrincipal,UUID,CreateBettingSlipRequest,MultipartFile)
+	{DELETE [/api/v1/admin/games/slips/{slipId}]}: deleteSlip(AdminPrincipal,UUID)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.AnalyticsController:
+	{GET [/api/v1/analytics/match]}: getMatchAnalytics(AdminPrincipal,UUID)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.FootballDataController:
+	{GET [/api/v1/football/teams/{teamId}/matches/upcoming]}: getTeamUpcomingMatches(AdminPrincipal,int)
+	{GET [/api/v1/football/fixtures/range]}: getFixturesByDateRange(AdminPrincipal,String,String)
+	{GET [/api/v1/football/teams/{teamId}/matches/recent]}: getTeamRecentMatches(AdminPrincipal,int,int)
+	{GET [/api/v1/football/h2h/{matchId}]}: getHeadToHead(AdminPrincipal,int)
+	{GET [/api/v1/football/competitions]}: getActiveLeagues(AdminPrincipal)
+	{GET [/api/v1/football/scorers]}: getTopScorers(AdminPrincipal,int,int)
+	{GET [/api/v1/football/standings]}: getStandings(AdminPrincipal,int,int)
+	{GET [/api/v1/football/fixtures/date]}: getFixturesByDate(AdminPrincipal,String,int,int)
+	{GET [/api/v1/football/fixtures/today]}: getTodayMatches(AdminPrincipal)
+	{GET [/api/v1/football/teams/{teamId}/stats]}: getTeamStats(AdminPrincipal,int,int,int)
+	{GET [/api/v1/football/fixtures/{fixtureId}]}: getFixtureById(AdminPrincipal,int)
+	{GET [/api/v1/football/live]}: getLiveFixtures(AdminPrincipal)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.GameController:
+	{GET [/api/v1/games/day-after-tomorrow]}: getDayAfterTomorrowGames(UserPrincipal)
+	{GET [/api/v1/games/featured/free]}: getFeaturedFreeGames(UserPrincipal)
+	{GET [/api/v1/games/top5/search]}: searchTop5LeagueGames(UserPrincipal,String)
+	{GET [/api/v1/games/today]}: getTodayGames(UserPrincipal)
+	{GET [/api/v1/games/by-date]}: getGamesByDate(UserPrincipal,LocalDate)
+	{GET [/api/v1/games/tomorrow]}: getTomorrowGames(UserPrincipal)
+	{GET [/api/v1/games/next-week]}: getNextWeekGames(UserPrincipal)
+	{GET [/api/v1/games/ws-info]}: getWebSocketInfo(UserPrincipal)
+	{POST [/api/v1/games/live/refresh]}: refreshLiveScores(UserPrincipal)
+	{GET [/api/v1/games/featured]}: getFeaturedGames(UserPrincipal)
+	{GET [/api/v1/games/league]}: getGamesByLeague(UserPrincipal,String)
+	{GET [/api/v1/games/history]}: getPreviousGames(int,int,int,UserPrincipal)
+	{GET [/api/v1/games/search]}: searchGames(UserPrincipal,String)
+	{GET [/api/v1/games/slips/{slipId}]}: getSlipById(UserPrincipal,UUID)
+	{GET [/api/v1/games/upcoming]}: getUpcomingGames(UserPrincipal)
+	{GET [/api/v1/games/top5]}: getTop5LeagueGames(UserPrincipal)
+	{GET [/api/v1/games/live]}: getLiveGames(UserPrincipal)
+	{GET [/api/v1/games/slips/free]}: getFreeSlips(UserPrincipal)
+	{PUT [/api/v1/games/slips/{slipId}], consumes [multipart/form-data]}: updateSlip(UserPrincipal,UUID,CreateBettingSlipRequest,MultipartFile)
+	{GET [/api/v1/games/{id}]}: getGame(UserPrincipal,UUID)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.OddsController:
+	{GET [/api/v1/admin/odds/sport/full]}: getFullOddsForSport(AdminPrincipal,String,String)
+	{GET [/api/v1/admin/odds/scores/live]}: getLiveScores(AdminPrincipal,String)
+	{GET [/api/v1/admin/odds/event/{eventId}/markets]}: getEventMarkets(AdminPrincipal,String,String,String)
+	{GET [/api/v1/admin/odds/event/{eventId}]}: getOddsForEvent(AdminPrincipal,String,String,String)
+	{GET [/api/v1/admin/odds/sport]}: getOddsForSport(AdminPrincipal,String,String)
+	{GET [/api/v1/admin/odds/sports]}: getInSeasonSports(AdminPrincipal)
+	{GET [/api/v1/admin/odds/events]}: getEvents(AdminPrincipal,String)
+	{GET [/api/v1/admin/odds/scores]}: getScores(AdminPrincipal,String,int)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.PaystackController:
+	{POST [/api/v1/payment/webhook]}: handleWebhook(Map,String)
+	{GET [/api/v1/payment/history]}: getPaymentHistory(UserPrincipal)
+	{GET [/api/v1/payment/verify/{reference}]}: verifyPayment(UserPrincipal,String)
+	{POST [/api/v1/payment/initiate]}: initiatePayment(UserPrincipal,String)
+	{GET [/api/v1/payment/vip/price]}: getVipPrice(UserPrincipal)
+	{GET [/api/v1/payment/vip/status]}: getVipStatus(UserPrincipal)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.PublicGameController:
+	{GET [/api/v1/public/today]}: getPublicTodayGames()
+	{GET [/api/v1/public/starting-soon]}: getGamesStartingSoon()
+	{GET [/api/v1/public/history]}: getPreviousGames(int,int,int)
+	{GET [/api/v1/public/slips]}: getPublicFreeSlips()
+	{GET [/api/v1/public/live]}: getPublicLiveGames()
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.ScheduledFetchController:
+	{GET [/api/v1/admin/scheduler/status]}: getStatus(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/settle-predictions]}: runSettlePredictions(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/fixtures]}: runFixtures(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/expire-vip]}: runExpireVip(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/live-scores]}: runLiveScores(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/odds]}: runOdds(UserPrincipal)
+	{POST [/api/v1/admin/scheduler/run/all]}: runAll(UserPrincipal)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.TestController:
+	{GET [/api/booking/admin/test-fixtures]}: testFixtures()
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.UserController:
+	{POST [/api/v1/auth/register]}: register(CreateUserRequest)
+	{POST [/api/v1/auth/login]}: login(LoginRequest)
+	{GET [/api/v1/users/me]}: getUserDetails(UserPrincipal)
+	{PATCH [/api/v1/users/me]}: updateUser(UserPrincipal,UpdateUserRequest)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	c.b.B.c.VipGameController:
+	{GET [/api/v1/vip/games/history]}: getVipPreviousGames(int,int,int,UserPrincipal)
+	{GET [/api/v1/vip/games/slips/bookmaker]}: getVipSlipsByBookmaker(UserPrincipal,String)
+	{GET [/api/v1/vip/games/live/vip-only]}: getVipOnlyLiveGames(UserPrincipal)
+	{GET [/api/v1/vip/games/upcoming]}: getUpcomingVipGames(UserPrincipal)
+	{GET [/api/v1/vip/games/featured]}: getFeaturedVipGames(UserPrincipal)
+	{GET [/api/v1/vip/games/league]}: getVipGamesByLeague(UserPrincipal,String)
+	{GET [/api/v1/vip/games/match/{externalFixtureId}/details]}: getVipMatchDetails(UserPrincipal,String)
+	{GET [/api/v1/vip/games/slips]}: getVipSlips(UserPrincipal)
+	{GET [/api/v1/vip/games/live]}: getVipLiveGames(UserPrincipal)
+	{GET [/api/v1/vip/games/today]}: getVipTodayGames(UserPrincipal)
+2026-03-14 16:42:20 [main] TRACE o.s.w.s.m.m.a.RequestMappingHandlerMapping - 
+	o.s.b.w.a.e.BasicErrorController:
+	{ [/error]}: error(HttpServletRequest)
+	{ [/error], produces [text/html]}: errorHtml(HttpServletRequest,HttpServletResponse)
+2026-03-14 16:42:20 [main] DEBUG o.s.w.s.m.m.a.RequestMappingHandlerMapping - 114 mappings in 'requestMappingHandlerMapping'
+2026-03-14 16:42:22 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 1 endpoint beneath base path '/actuator'
+2026-03-14 16:42:22 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-03-14 16:42:22 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@77833456]]
+2026-03-14 16:42:22 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-03-14 16:42:22 [main] INFO  o.s.boot.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-03-14 16:42:22 [main] INFO  c.b.B.BettingWebsiteApplication - Started BettingWebsiteApplication in 17.58 seconds (process running for 18.423)
+2026-03-14 16:42:22 [MessageBroker-4] INFO  c.b.B.service.ScheduledFetchService - 🔄 [FIXTURES] Fetching 2026-03-13 → 2026-03-20
+2026-03-14 16:42:22 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 📅 Fetching matches — from: 2026-03-13, to: 2026-03-20
+2026-03-14 16:42:23 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔴 Fetching all live fixtures
+2026-03-14 16:42:23 [MessageBroker-3] INFO  c.b.B.service.ScheduledFetchService - 🔄 [ODDS] Fetching...
+2026-03-14 16:42:23 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_epl, region: uk
+2026-03-14 16:42:24 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:24.348502400 | Response: pong
+2026-03-14 16:42:25 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:26 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:26 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:26 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_spain_la_liga, region: uk
+2026-03-14 16:42:26 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:26 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [FD] 108 matches fetched
+2026-03-14 16:42:27 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:27 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:27 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_italy_serie_a, region: uk
+2026-03-14 16:42:27 [MessageBroker-2] INFO  c.b.B.service.ScheduledFetchService - 🔴 [LIVE] 13 matches in progress
+2026-03-14 16:42:27 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-13
+2026-03-14 16:42:27 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:27 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:27 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:27 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_germany_bundesliga, region: uk
+2026-03-14 16:42:27 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-14
+2026-03-14 16:42:27 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:27.793902300 | Response: pong
+2026-03-14 16:42:27 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:28 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:28 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:28 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_france_ligue_one, region: uk
+2026-03-14 16:42:28 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-15
+2026-03-14 16:42:28 [MessageBroker-2] INFO  c.b.B.service.ScheduledFetchService - 🔍 18 stale games — processing up to 8 this tick
+2026-03-14 16:42:28 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541159
+2026-03-14 16:42:28 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:28 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541159 — will retry next tick
+2026-03-14 16:42:28 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541162
+2026-03-14 16:42:28 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-16
+2026-03-14 16:42:28 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:28 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:28 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_uefa_champs_league, region: uk
+2026-03-14 16:42:28 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541162 — will retry next tick
+2026-03-14 16:42:28 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541157
+2026-03-14 16:42:28 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541157 — will retry next tick
+2026-03-14 16:42:28 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 544486
+2026-03-14 16:42:28 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:29 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-17
+2026-03-14 16:42:29 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 544486 — will retry next tick
+2026-03-14 16:42:29 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 537098
+2026-03-14 16:42:29 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:29 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:29 [MessageBroker-3] INFO  c.b.B.service.OddsApiClient - 📊 Fetching full odds — sport: soccer_uefa_europa_league, region: uk
+2026-03-14 16:42:29 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 537098 — will retry next tick
+2026-03-14 16:42:29 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 540638
+2026-03-14 16:42:29 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key1 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:29 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 540638 — will retry next tick
+2026-03-14 16:42:29 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-18
+2026-03-14 16:42:29 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 540635
+2026-03-14 16:42:29 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 540635 — will retry next tick
+2026-03-14 16:42:29 [MessageBroker-2] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 540631
+2026-03-14 16:42:29 [MessageBroker-3] WARN  c.b.B.service.OddsApiClient - ⚠️ odds-key2 hit HTTP 401 — quota or invalid key, falling back...
+2026-03-14 16:42:29 [MessageBroker-3] ERROR c.b.B.service.OddsApiClient - 🚨 All Odds API keys exhausted!
+2026-03-14 16:42:29 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-19
+2026-03-14 16:42:29 [MessageBroker-2] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 540631 — will retry next tick
+2026-03-14 16:42:30 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - ✅ [AF] 0 matches fetched for 2026-03-20
+2026-03-14 16:42:30 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 📦 Total after merge + dedup: 108
+2026-03-14 16:42:30 [MessageBroker-4] INFO  c.b.B.service.ScheduledFetchService - 📦 108 fixtures returned
+2026-03-14 16:42:33 [MessageBroker-4] INFO  c.b.B.service.ScheduledFetchService - ✅ Fixtures done, pushed to WebSocket
+2026-03-14 16:42:33 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:33.300727100 | Response: pong
+2026-03-14 16:42:37 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:37.815692900 | Response: pong
+2026-03-14 16:42:42 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:42.822459800 | Response: pong
+2026-03-14 16:42:47 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:47.859822500 | Response: pong
+2026-03-14 16:42:52 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔴 Fetching all live fixtures
+2026-03-14 16:42:52 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:52.775830 | Response: pong
+2026-03-14 16:42:57 [MessageBroker-4] INFO  c.b.B.service.ScheduledFetchService - 🔴 [LIVE] 13 matches in progress
+2026-03-14 16:42:57 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:42:57.784963400 | Response: pong
+2026-03-14 16:42:57 [MessageBroker-4] INFO  c.b.B.service.ScheduledFetchService - 🔍 9 stale games — processing up to 8 this tick
+2026-03-14 16:42:57 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541166
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541166 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541160
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541160 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 538075
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 538075 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541156
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541156 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541158
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541158 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541165
+2026-03-14 16:42:58 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541165 — will retry next tick
+2026-03-14 16:42:58 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541161
+2026-03-14 16:42:59 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541161 — will retry next tick
+2026-03-14 16:42:59 [MessageBroker-4] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541164
+2026-03-14 16:42:59 [MessageBroker-4] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541164 — will retry next tick
+2026-03-14 16:43:02 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:02.775775600 | Response: pong
+2026-03-14 16:43:07 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:07.797309600 | Response: pong
+2026-03-14 16:43:12 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:12.758208 | Response: pong
+2026-03-14 16:43:17 [MessageBroker-1] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:17.776249700 | Response: pong
+2026-03-14 16:43:22 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 4, active threads = 1, queued tasks = 6, completed tasks = 18]
+2026-03-14 16:43:22 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔴 Fetching all live fixtures
+2026-03-14 16:43:22 [MessageBroker-4] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:22.780064800 | Response: pong
+2026-03-14 16:43:24 [MessageBroker-1] INFO  c.b.B.service.ScheduledFetchService - 🔴 [LIVE] 13 matches in progress
+2026-03-14 16:43:24 [MessageBroker-1] INFO  c.b.B.service.ScheduledFetchService - 🔍 9 stale games — processing up to 8 this tick
+2026-03-14 16:43:24 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541166
+2026-03-14 16:43:24 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541166 — will retry next tick
+2026-03-14 16:43:24 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541156
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541156 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 538075
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 538075 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541160
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541160 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541158
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541158 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541161
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541161 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541165
+2026-03-14 16:43:25 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541165 — will retry next tick
+2026-03-14 16:43:25 [MessageBroker-1] INFO  c.b.B.service.ApiFootballClient - 🔍 [AF] Fetching fixture by ID: 541164
+2026-03-14 16:43:26 [MessageBroker-1] WARN  c.b.B.service.ScheduledFetchService - ⚠️ Empty api-sports response for fixture 541164 — will retry next tick
+2026-03-14 16:43:27 [MessageBroker-2] INFO  c.b.B.Config.Security.Scheduler - Keep-alive ping successful at 2026-03-14T16:43:27.781882 | Response: pong
