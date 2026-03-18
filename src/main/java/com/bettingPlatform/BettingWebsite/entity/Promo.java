@@ -19,18 +19,30 @@ public class Promo {
 
     private String title;
     private String description;
-    private String imageUrl;       // optional promo banner
+    private String imageUrl;
 
     @Enumerated(EnumType.STRING)
-    private PromoType type;        // DISCOUNT, FREE_VIP, ANNOUNCEMENT
+    private PromoType type;
 
-    private Double discountPercent; // e.g. 50.0 for 50% off VIP
+    private Double discountPercent;
     private LocalDateTime startsAt;
     private LocalDateTime expiresAt;
 
-    @Builder.Default
-    private boolean active = true;
-
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    /**
+     * Computed at read-time — no stored column needed.
+     * A promo is active if the current time is between startsAt and expiresAt.
+     * This means you never need a scheduler to flip an "active" flag.
+     *
+     * @Transient = not persisted to DB, just calculated on the fly.
+     */
+    @Transient
+    public boolean isActive() {
+        LocalDateTime now = LocalDateTime.now();
+        return startsAt != null && expiresAt != null
+                && !now.isBefore(startsAt)
+                && now.isBefore(expiresAt);
+    }
 }

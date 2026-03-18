@@ -99,6 +99,20 @@ public class AdminDashboardService {
     public PromoResponse createPromo(CreatePromoRequest request,
                                      MultipartFile image) throws IOException {
 
+        // Parse date strings manually — works with both "YYYY-MM-DDTHH:MM" and "YYYY-MM-DDTHH:MM:SS"
+        LocalDateTime startsAt;
+        LocalDateTime expiresAt;
+        try {
+            startsAt  = parseFlexibleDateTime(request.getStartsAt());
+            expiresAt = parseFlexibleDateTime(request.getExpiresAt());
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid date format. Expected YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS");
+        }
+
+        if (!startsAt.isBefore(expiresAt)) {
+            throw new RuntimeException("Expiry time must be after start time.");
+        }
+
         String imageUrl = null;
         if (image != null && !image.isEmpty()) {
             Map uploadResult = cloudinaryService.uploadImage(image, "bettingPlatform/promos");
@@ -112,8 +126,8 @@ public class AdminDashboardService {
                 .imageUrl(imageUrl)
                 .type(request.getType())
                 .discountPercent(request.getDiscountPercent())
-                .startsAt(request.getStartsAt())
-                .expiresAt(request.getExpiresAt())
+                .startsAt(startsAt)
+                .expiresAt(expiresAt)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -121,6 +135,17 @@ public class AdminDashboardService {
         Promo saved = promoRepo.save(promo);
         log.info("🎉 Promo created: {}", saved.getTitle());
         return mapPromo(saved);
+    }
+
+    /**
+     * Accepts both "YYYY-MM-DDTHH:MM" (from datetime-local input)
+     * and "YYYY-MM-DDTHH:MM:SS" (ISO-8601 with seconds).
+     */
+    private LocalDateTime parseFlexibleDateTime(String raw) {
+        if (raw == null || raw.isBlank()) throw new RuntimeException("Date cannot be blank");
+        // Append seconds if missing (datetime-local gives 16-char string)
+        String normalized = raw.length() == 16 ? raw + ":00" : raw;
+        return LocalDateTime.parse(normalized); // uses ISO_LOCAL_DATE_TIME by default
     }
 
     public List<PromoResponse> getActivePromos() {

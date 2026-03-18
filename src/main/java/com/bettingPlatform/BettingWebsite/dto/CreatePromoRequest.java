@@ -4,8 +4,6 @@ import com.bettingPlatform.BettingWebsite.entity.PromoType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
-import org.springframework.format.annotation.DateTimeFormat;
-import java.time.LocalDateTime;
 
 @Data
 public class CreatePromoRequest {
@@ -20,11 +18,11 @@ public class CreatePromoRequest {
 
     private Double discountPercent;
 
-    @NotNull(message = "Start time is required")
-    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private LocalDateTime startsAt;
+    // Accept as String to avoid @ModelAttribute LocalDateTime parsing issues
+    // Parsed manually in AdminDashboardService using LocalDateTime.parse()
+    @NotBlank(message = "Start time is required")
+    private String startsAt;
 
-    @NotNull(message = "Expiry time is required")
-    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-    private LocalDateTime expiresAt;
+    @NotBlank(message = "Expiry time is required")
+    private String expiresAt;
 }
