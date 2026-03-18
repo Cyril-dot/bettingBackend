@@ -11,9 +11,17 @@ import java.util.UUID;
 public interface PromoRepo extends JpaRepository<Promo, UUID> {
 
     /**
-     * A promo is "active" if now is between startsAt and expiresAt.
-     * No stored `active` column needed — computed from dates only.
+     * Used by the PUBLIC endpoint — only returns promos currently in their active window.
+     * A promo is "live" if now is between startsAt and expiresAt.
      */
-    @Query("SELECT p FROM Promo p WHERE p.startsAt <= :now AND p.expiresAt > :now")
+    @Query("SELECT p FROM Promo p WHERE p.startsAt <= :now AND p.expiresAt > :now ORDER BY p.startsAt DESC")
     List<Promo> findActivePromos(@Param("now") LocalDateTime now);
+
+    /**
+     * Used by the ADMIN endpoint — returns ALL promos regardless of date,
+     * ordered by creation date (newest first).
+     * Admins need to see upcoming, live, and expired promos.
+     */
+    @Query("SELECT p FROM Promo p ORDER BY p.createdAt DESC")
+    List<Promo> findAllPromos();
 }

@@ -26,35 +26,22 @@ public class AdminDashboardService {
     private final UserRepo               userRepo;
     private final AiAnalyticsService     aiAnalyticsService;
     private final CloudinaryService      cloudinaryService;
-    private final CurrencyConverter      currencyConverter;   // ← injected
+    private final CurrencyConverter      currencyConverter;
 
 
     // ── VIP Price ─────────────────────────────────────────────────
 
-    /**
-     * Admin sets the VIP price in ANY supported currency (USD, GHS, NGN, EUR, GBP).
-     * The price is stored as-is; conversion to each user's local currency
-     * happens at payment time inside PaystackService.
-     *
-     * Validation:
-     *   - Currency must be in CurrencyConverter.SUPPORTED_BASE_CURRENCIES
-     *   - Price must be > 0
-     */
     public VipPriceResponse setVipPrice(SetVipPriceRequest request) {
-        // Validate currency
         String currency = request.getCurrency().toUpperCase();
         if (!CurrencyConverter.SUPPORTED_BASE_CURRENCIES.contains(currency)) {
             throw new RuntimeException(
                     "Unsupported currency: " + currency +
                             ". Allowed: " + CurrencyConverter.SUPPORTED_BASE_CURRENCIES);
         }
-
-        // Validate price
         if (request.getPrice() == null || request.getPrice() <= 0) {
             throw new RuntimeException("VIP price must be greater than zero.");
         }
 
-        // Deactivate existing active price
         vipPriceRepo.findByActiveTrue().ifPresent(existing -> {
             existing.setActive(false);
             vipPriceRepo.save(existing);
@@ -64,7 +51,7 @@ public class AdminDashboardService {
 
         VipPrice price = VipPrice.builder()
                 .price(request.getPrice())
-                .currency(currency)                    // stored exactly as admin chose
+                .currency(currency)
                 .description(request.getDescription())
                 .active(true)
                 .updatedAt(LocalDateTime.now())
@@ -72,7 +59,6 @@ public class AdminDashboardService {
 
         VipPrice saved = vipPriceRepo.save(price);
 
-        // Log equivalent amounts in all supported Paystack currencies for reference
         double ghsEquiv = currencyConverter.convert(saved.getPrice(), currency, "GHS");
         double ngnEquiv = currencyConverter.convert(saved.getPrice(), currency, "NGN");
         double usdEquiv = currencyConverter.convert(saved.getPrice(), currency, "USD");
@@ -83,10 +69,6 @@ public class AdminDashboardService {
         return buildVipPriceResponse(saved);
     }
 
-    /**
-     * Returns the current active VIP price (as the admin set it — no conversion here).
-     * Frontend should call PaystackService.getVipPriceForUser() for user-facing prices.
-     */
     public VipPriceResponse getCurrentVipPrice() {
         VipPrice price = vipPriceRepo.findByActiveTrue()
                 .orElseThrow(() -> new RuntimeException("No active VIP price configured."));
@@ -99,7 +81,6 @@ public class AdminDashboardService {
     public PromoResponse createPromo(CreatePromoRequest request,
                                      MultipartFile image) throws IOException {
 
-        // Parse date strings manually — works with both "YYYY-MM-DDTHH:MM" and "YYYY-MM-DDTHH:MM:SS"
         LocalDateTime startsAt;
         LocalDateTime expiresAt;
         try {
@@ -138,16 +119,18 @@ public class AdminDashboardService {
     }
 
     /**
-     * Accepts both "YYYY-MM-DDTHH:MM" (from datetime-local input)
-     * and "YYYY-MM-DDTHH:MM:SS" (ISO-8601 with seconds).
+     * ADMIN — returns ALL promos (upcoming + active + expired).
+     * This is what the admin dashboard displays.
      */
-    private LocalDateTime parseFlexibleDateTime(String raw) {
-        if (raw == null || raw.isBlank()) throw new RuntimeException("Date cannot be blank");
-        // Append seconds if missing (datetime-local gives 16-char string)
-        String normalized = raw.length() == 16 ? raw + ":00" : raw;
-        return LocalDateTime.parse(normalized); // uses ISO_LOCAL_DATE_TIME by default
+    public List<PromoResponse> getAllPromos() {
+        return promoRepo.findAllPromos()
+                .stream().map(this::mapPromo).collect(Collectors.toList());
     }
 
+    /**
+     * PUBLIC — returns only currently active promos (date window check).
+     * This is what the user-facing app displays.
+     */
     public List<PromoResponse> getActivePromos() {
         return promoRepo.findActivePromos(LocalDateTime.now())
                 .stream().map(this::mapPromo).collect(Collectors.toList());
@@ -167,14 +150,18 @@ public class AdminDashboardService {
         log.info("🗑️ Promo deleted: {}", id);
     }
 
+    private LocalDateTime parseFlexibleDateTime(String raw) {
+        if (raw == null || raw.isBlank()) throw new RuntimeException("Date cannot be blank");
+        String normalized = raw.length() == 16 ? raw + ":00" : raw;
+        return LocalDateTime.parse(normalized);
+    }
+
     private String extractPublicId(String imageUrl) {
-        // e.g. https://res.cloudinary.com/cloud/image/upload/v123/bettingPlatform/promos/abc.jpg
-        //   →  bettingPlatform/promos/abc
         try {
             String[] parts      = imageUrl.split("/upload/");
-            String afterUpload  = parts[1];                              // v123/bettingPlatform/promos/abc.jpg
-            String withoutVer   = afterUpload.replaceFirst("v\\d+/", ""); // bettingPlatform/promos/abc.jpg
-            return withoutVer.substring(0, withoutVer.lastIndexOf("."));  // remove extension
+            String afterUpload  = parts[1];
+            String withoutVer   = afterUpload.replaceFirst("v\\d+/", "");
+            return withoutVer.substring(0, withoutVer.lastIndexOf("."));
         } catch (Exception e) {
             log.warn("⚠️ Could not extract public_id from: {}", imageUrl);
             return imageUrl;
@@ -185,9 +172,8 @@ public class AdminDashboardService {
     // ── Dashboard stats ───────────────────────────────────────────
 
     public DashboardStatsResponse getDashboardStats() {
-        long totalUsers  = userRepo.count();
-        long activeVip   = vipSubscriptionRepo.countByActiveTrue();
-
+        long totalUsers = userRepo.count();
+        long activeVip  = vipSubscriptionRepo.countByActiveTrue();
         return DashboardStatsResponse.builder()
                 .totalUsers(totalUsers)
                 .activeVipUsers(activeVip)
