@@ -32,11 +32,18 @@ public class Promo {
     private LocalDateTime updatedAt;
 
     /**
-     * Computed at read-time — no stored column needed.
-     * A promo is active if the current time is between startsAt and expiresAt.
-     * This means you never need a scheduler to flip an "active" flag.
-     *
-     * @Transient = not persisted to DB, just calculated on the fly.
+     * Stored in DB with NOT NULL constraint — always true on insert.
+     * Satisfies the existing DB column without needing a migration.
+     */
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean active = true;
+
+    /**
+     * Computed at read-time — NOT persisted (@Transient).
+     * Returns true only if now is between startsAt and expiresAt.
+     * Jackson serializes this as "active" in JSON, which is what
+     * the frontend chip reads — so the stored column is just a DB placeholder.
      */
     @Transient
     public boolean isActive() {
