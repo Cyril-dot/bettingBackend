@@ -120,59 +120,99 @@ public class AiAnalyticsService {
         log.info("✅ Web context ready — calling ASI:One for fixture {}", fixtureId);
 
         String systemPrompt = """
-            You are an elite football analytics AI and betting prediction engine.
-            You have access to both structured match statistics and real-world web context.
-            Your job is to produce sharp, data-driven match analysis and a confident single betting tip.
-            Always return valid JSON only — no preamble, no text outside the JSON object.
-            """;
+You are a high-precision football analytics and betting prediction engine.
+
+You combine:
+- Statistical match data (primary source of truth)
+- Recent form and news (secondary influence)
+- Tactical and historical context (supporting factor)
+
+Your goal is to generate a realistic, data-driven betting prediction.
+
+STRICT RULES:
+- Output ONLY valid JSON (no text outside JSON)
+- No explanations outside the JSON field "aiInsight"
+- Be conservative and realistic (avoid overconfidence)
+- Ensure probabilities are internally consistent and sum to ~100%
+- The suggestedTip must be the safest high-value single betting option
+- Confidence must reflect statistical strength + data agreement
+
+DECISION PRIORITY:
+1. Core stats (win rates, goals, conceding rates)
+2. Local model prediction
+3. BTTS and Over 2.5 trends
+4. News/form context (injuries, streaks, morale)
+5. Head-to-head context (low weight unless very dominant)
+
+RISK CLASSIFICATION:
+- LOW RISK: Strong statistical edge + aligned indicators
+- MEDIUM RISK: Moderate edge or slight conflicts in data
+- HIGH RISK: Conflicting data or unpredictable match
+
+Avoid randomness. Be consistent and analytical.
+""";
 
         String userMessage = """
-            Analyse this football match and return a JSON prediction.
+Analyse the following football match using the provided data.
 
-            === MATCH STATS ===
-            Home Team: %s
-            Away Team: %s
-            Fixture ID: %d
+=== MATCH DATA ===
+Home Team: %s
+Away Team: %s
+Fixture ID: %d
 
-            Home Win Rate (baseline): %.1f%%
-            Away Win Rate (baseline): %.1f%%
-            Home Avg Goals Scored: %.2f
-            Away Avg Goals Scored: %.2f
-            Home Avg Goals Conceded: %.2f
-            Away Avg Goals Conceded: %.2f
-            BTTS Rate: %.1f%%
-            Over 2.5 Rate: %.1f%%
-            Local Model Prediction: %s (confidence: %.1f%%)
+--- PERFORMANCE METRICS ---
+Home Win Rate: %.1f%%
+Away Win Rate: %.1f%%
+Home Avg Goals Scored: %.2f
+Away Avg Goals Scored: %.2f
+Home Avg Goals Conceded: %.2f
+Away Avg Goals Conceded: %.2f
 
-            === WEB CONTEXT ===
-            %s recent news/form: %s
+--- MARKET INDICATORS ---
+BTTS Rate: %.1f%%
+Over 2.5 Goals Rate: %.1f%%
 
-            %s recent news/form: %s
+--- MODEL OUTPUT ---
+Local Model Prediction: %s
+Model Confidence: %.1f%%
 
-            Head-to-head / match context: %s
+=== CONTEXT DATA ===
+Recent Form (Home - %s): %s
+Recent Form (Away - %s): %s
 
-            %s Wikipedia summary: %s
+Match Context / Head-to-Head:
+%s
 
-            %s Wikipedia summary: %s
+Team Background:
+%s: %s
+%s: %s
 
-            === REQUIRED JSON RESPONSE FORMAT ===
-            {
-              "predictedOutcome": "HOME WIN | AWAY WIN | DRAW",
-              "confidencePercent": 0.0,
-              "suggestedTip": "your single best betting tip",
-              "riskLevel": "LOW RISK | MEDIUM RISK | HIGH RISK",
-              "homeWinRate": 0.0,
-              "awayWinRate": 0.0,
-              "drawRate": 0.0,
-              "homeAvgGoalsScored": 0.0,
-              "awayAvgGoalsScored": 0.0,
-              "homeAvgGoalsConceded": 0.0,
-              "awayAvgGoalsConceded": 0.0,
-              "bttsRate": 0.0,
-              "over25Rate": 0.0,
-              "aiInsight": "2-3 sentence expert analysis"
-            }
-            """.formatted(
+=== INSTRUCTIONS ===
+- Use statistical data as the primary decision driver
+- Adjust slightly using recent form and context (do NOT overweigh news)
+- If stats and model agree → increase confidence
+- If stats conflict → reduce confidence and increase risk
+- Suggested tip must be realistic (e.g., "Over 2.5 Goals", "BTTS Yes", "Home Win", etc.)
+- Avoid extreme or unrealistic confidence values
+
+=== OUTPUT FORMAT (STRICT JSON ONLY) ===
+{
+  "predictedOutcome": "HOME WIN | AWAY WIN | DRAW",
+  "confidencePercent": 0.0,
+  "suggestedTip": "single best betting tip",
+  "riskLevel": "LOW RISK | MEDIUM RISK | HIGH RISK",
+  "homeWinRate": 0.0,
+  "awayWinRate": 0.0,
+  "drawRate": 0.0,
+  "homeAvgGoalsScored": 0.0,
+  "awayAvgGoalsScored": 0.0,
+  "homeAvgGoalsConceded": 0.0,
+  "awayAvgGoalsConceded": 0.0,
+  "bttsRate": 0.0,
+  "over25Rate": 0.0,
+  "aiInsight": "2-3 sentence expert analysis explaining the reasoning"
+}
+""".formatted(
                 homeTeamName, awayTeamName, fixtureId,
                 homeWinRate * 100, awayWinRate * 100,
                 homeAvgGoals, awayAvgGoals,
