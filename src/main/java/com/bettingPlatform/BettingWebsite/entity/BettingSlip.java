@@ -2,96 +2,111 @@ package com.bettingPlatform.BettingWebsite.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * BettingSlip entity.
+ *
+ * Supports two slip types:
+ *
+ * (A) Legacy single-game slip
+ *     game → links to a Game entity
+ *     description contains prediction keywords (HOME_WIN, OVER_2_5 etc.)
+ *     used by auto-settle logic
+ *
+ * (B) Multi-game booking code slip (new)
+ *     selections   → TEXT column storing JSON array of all game details
+ *     totalSelections → count of games
+ *     deadline     → Sportybet code expiry string
+ *     game field is null for these slips
+ */
 @Entity
-@Data
-@Builder
-@AllArgsConstructor
-@NoArgsConstructor
 @Table(name = "betting_slips_table")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class BettingSlip {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    // ── Linked game (optional — slip might cover multiple games) ──
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "game_id")
-    private Game game;
+    // ── Bookmaker info ─────────────────────────────────────────────────────────
+    @Column(nullable = false)
+    private String bookmaker;
 
-    // ── Slip details ──────────────────────────────────────────────
-    private String bookmaker;        // "Sportybet Ghana", "Betway Ghana" etc
-    private String bookingCode;      // e.g. "8RF5L8"
-    private String description;      // human-readable summary of all games
-    private Double totalOdds;        // combined odds of all selections
-    private String imageUrl;         // uploaded slip screenshot
+    @Column(nullable = false)
+    private String bookingCode;
 
-    @Enumerated(EnumType.STRING)
-    private PredictionType type;     // FREE or VIP
+    // ── Odds ───────────────────────────────────────────────────────────────────
+    private Double totalOdds;
 
-    @Enumerated(EnumType.STRING)
-    @Builder.Default
-    private SlipStatus status = SlipStatus.ACTIVE;
+    // ── Content ────────────────────────────────────────────────────────────────
+    @Column(columnDefinition = "TEXT")
+    private String description;
 
-    @Builder.Default
-    private boolean published = false;
+    @Column(columnDefinition = "TEXT")
+    private String imageUrl;
 
-    private LocalDateTime validUntil;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-
-    // ── Multi-game slip fields ─────────────────────────────────────
+    // ── Multi-game fields (booking code slips) ─────────────────────────────────
 
     /**
-     * JSON array storing full details of every game in this slip.
+     * JSON array of all game selections fetched from the bookmaker.
+     * Each element has: homeTeam, awayTeam, league, country, sport,
+     * market, outcome, odds, kickoffTime, kickoffTimestamp, matchStatus,
+     * score, playedTime, statusCode, bookingStatus, isWinning, eventId, gameId
      *
-     * Stored as TEXT in DB — each element is one game with all fields:
-     *
-     * [
-     *   {
-     *     "homeTeam":         "Club Necaxa",
-     *     "awayTeam":         "Club Tijuana de Caliente",
-     *     "league":           "Liga MX, Clausura",
-     *     "country":          "Mexico",
-     *     "sport":            "Football",
-     *     "market":           "1X2",
-     *     "outcome":          "Home",
-     *     "odds":             2.20,
-     *     "kickoffTime":      "2026-03-21 01:00 UTC",
-     *     "kickoffTimestamp": 1774054800000,
-     *     "matchStatus":      "Not start",
-     *     "score":            "",
-     *     "playedTime":       "",
-     *     "statusCode":       0,
-     *     "bookingStatus":    "Booked",
-     *     "isWinning":        false,
-     *     "eventId":          "sr:match:66856082",
-     *     "gameId":           "20199"
-     *   },
-     *   ...
-     * ]
-     *
-     * Frontend usage:
-     *   const games = JSON.parse(slip.selections);
-     *   games.forEach(game => renderGameRow(game));
+     * Stored as TEXT — parsed by frontend to render individual game rows.
      */
     @Column(columnDefinition = "TEXT")
     private String selections;
 
     /**
-     * Number of games in this slip e.g. 4
-     * Used to show "4 games" badge on the slip card without parsing JSON
+     * Number of game selections in this slip.
+     * Denormalized for fast display without JSON parsing.
      */
     @Column(name = "total_selections")
     private Integer totalSelections;
 
     /**
-     * Booking code expiry deadline from Sportybet
+     * Booking code expiry datetime string from Sportybet.
+     * Stored as plain String to avoid timezone complexity.
      * e.g. "2026-03-31T01:00:00.000+00:00"
      */
     @Column(name = "deadline")
     private String deadline;
+
+    // ── Status & type ──────────────────────────────────────────────────────────
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private PredictionType type;
+
+    @Enumerated(EnumType.STRING)
+    private SlipStatus status;
+
+    @Column(nullable = false)
+    private boolean published;
+
+    private LocalDateTime validUntil;
+
+    // ── Timestamps ─────────────────────────────────────────────────────────────
+    @Column(nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(nullable = false)
+    private LocalDateTime updatedAt;
+
+    // ── Legacy single-game link (optional) ────────────────────────────────────
+    /**
+     * Links this slip to a single tracked Game entity.
+     * Used by the auto-settle feature to determine WON/LOST based on match result.
+     * Null for multi-game booking-code slips.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "game_id")
+    private Game game;
 }

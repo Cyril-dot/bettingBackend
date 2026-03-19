@@ -180,25 +180,47 @@ public class GameService {
         return mapSlip(slip);
     }
 
+    /**
+     * CREATE BETTING SLIP — handles both legacy single-game slips and new
+     * multi-game booking-code slips.
+     *
+     * New fields supported in CreateBettingSlipRequest:
+     *   - selections      (String)  — JSON array of all game selections
+     *   - totalSelections (Integer) — number of games in the slip
+     *   - deadline        (String)  — booking code expiry from Sportybet
+     *
+     * These are persisted directly to the BettingSlip entity so the frontend
+     * can render each game as an individual row in the slip detail view.
+     */
     public BettingSlipResponse createBettingSlip(CreateBettingSlipRequest request) {
         Game game = null;
         if (request.getGameId() != null) {
             game = gameRepo.findById(request.getGameId()).orElse(null);
         }
+
         BettingSlip slip = BettingSlip.builder()
                 .game(game)
                 .bookmaker(request.getBookmaker())
                 .bookingCode(request.getBookingCode())
                 .description(request.getDescription())
                 .totalOdds(request.getTotalOdds())
-                .type(request.getType())
+                .type(request.getType() != null ? request.getType() : PredictionType.FREE)
                 .validUntil(request.getValidUntil())
                 .published(request.isPublished())
+                // ── Multi-game booking code fields ─────────────────────────
+                .selections(request.getSelections())              // JSON array string
+                .totalSelections(request.getTotalSelections())    // game count
+                .deadline(request.getDeadline())                  // code expiry
+                // ──────────────────────────────────────────────────────────
+                .status(SlipStatus.ACTIVE)
                 .createdAt(LocalDateTime.now(APP_ZONE))
                 .updatedAt(LocalDateTime.now(APP_ZONE))
                 .build();
+
         BettingSlip saved = bettingSlipRepo.save(slip);
-        log.info("🎫 Slip created: {} — {}", saved.getBookmaker(), saved.getBookingCode());
+        log.info("🎫 Slip created: {} — {} | games={} odds={}",
+                saved.getBookmaker(), saved.getBookingCode(),
+                saved.getTotalSelections(), saved.getTotalOdds());
         return mapSlip(saved);
     }
 
@@ -211,22 +233,35 @@ public class GameService {
         return mapSlip(bettingSlipRepo.save(slip));
     }
 
+    /**
+     * CREATE SLIP WITH IMAGE — used by the admin game-codes page.
+     * Saves the slip (including selections JSON) then uploads the image.
+     */
     public BettingSlipResponse createSlipWithImage(CreateBettingSlipRequest request, MultipartFile image) throws IOException {
         BettingSlipResponse slip = createBettingSlip(request);
-        if (image != null && !image.isEmpty()) return uploadSlipImage(slip.getId(), image);
+        if (image != null && !image.isEmpty()) {
+            return uploadSlipImage(slip.getId(), image);
+        }
         return slip;
     }
 
     public BettingSlipResponse updateSlip(UUID slipId, CreateBettingSlipRequest request, MultipartFile image) throws IOException {
         BettingSlip slip = bettingSlipRepo.findById(slipId)
                 .orElseThrow(() -> new RuntimeException("Slip not found: " + slipId));
-        if (request.getBookmaker()   != null) slip.setBookmaker(request.getBookmaker());
-        if (request.getBookingCode() != null) slip.setBookingCode(request.getBookingCode());
-        if (request.getDescription() != null) slip.setDescription(request.getDescription());
-        if (request.getTotalOdds()   != null) slip.setTotalOdds(request.getTotalOdds());
-        if (request.getType()        != null) slip.setType(request.getType());
-        if (request.getValidUntil()  != null) slip.setValidUntil(request.getValidUntil());
+
+        if (request.getBookmaker()       != null) slip.setBookmaker(request.getBookmaker());
+        if (request.getBookingCode()     != null) slip.setBookingCode(request.getBookingCode());
+        if (request.getDescription()     != null) slip.setDescription(request.getDescription());
+        if (request.getTotalOdds()       != null) slip.setTotalOdds(request.getTotalOdds());
+        if (request.getType()            != null) slip.setType(request.getType());
+        if (request.getValidUntil()      != null) slip.setValidUntil(request.getValidUntil());
+        // ── Multi-game fields ─────────────────────────────────────────────
+        if (request.getSelections()      != null) slip.setSelections(request.getSelections());
+        if (request.getTotalSelections() != null) slip.setTotalSelections(request.getTotalSelections());
+        if (request.getDeadline()        != null) slip.setDeadline(request.getDeadline());
+        // ─────────────────────────────────────────────────────────────────
         slip.setPublished(request.isPublished());
+
         if (image != null && !image.isEmpty()) {
             Map<String, Object> uploadResult = cloudinaryService.uploadImage(image, "bettingPlatform/slips");
             slip.setImageUrl((String) uploadResult.get("secure_url"));
@@ -304,9 +339,11 @@ public class GameService {
 
         int h = game.getHomeScore(), a = game.getAwayScore();
         Map<String, Boolean> results = Map.of(
-                "HOME_WIN", h > a, "AWAY_WIN", a > h, "DRAW", h == a,
-                "BTTS", h > 0 && a > 0, "OVER_1_5", (h+a) > 1, "OVER_2_5", (h+a) > 2,
-                "OVER_3_5", (h+a) > 3, "UNDER_2_5", (h+a) < 3, "UNDER_1_5", (h+a) < 2, "OVER_0_5", (h+a) > 0
+                "HOME_WIN",  h > a,       "AWAY_WIN",  a > h,
+                "DRAW",      h == a,      "BTTS",      h > 0 && a > 0,
+                "OVER_1_5",  (h+a) > 1,  "OVER_2_5",  (h+a) > 2,
+                "OVER_3_5",  (h+a) > 3,  "UNDER_2_5", (h+a) < 3,
+                "UNDER_1_5", (h+a) < 2,  "OVER_0_5",  (h+a) > 0
         );
         boolean allCorrect = keys.stream().allMatch(k -> Boolean.TRUE.equals(results.get(k)));
         slip.setStatus(allCorrect ? SlipStatus.WON : SlipStatus.LOST);
@@ -334,7 +371,10 @@ public class GameService {
 
     private List<String> parseOutcomeKeys(String raw) {
         List<String> keys = new ArrayList<>();
-        for (String k : new String[]{"HOME_WIN","AWAY_WIN","DRAW","BTTS","OVER_1_5","OVER_2_5","OVER_3_5","UNDER_2_5","UNDER_1_5","OVER_0_5"})
+        for (String k : new String[]{
+                "HOME_WIN","AWAY_WIN","DRAW","BTTS",
+                "OVER_1_5","OVER_2_5","OVER_3_5",
+                "UNDER_2_5","UNDER_1_5","OVER_0_5"})
             if (raw.contains(k)) keys.add(k);
         return keys;
     }
@@ -518,63 +558,62 @@ public class GameService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // BOOKING CODE — Create one slip from a multi-game code
+    // BOOKING CODE — fetch + save as one multi-game slip
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Fetches a booking code and saves it as ONE BettingSlip containing ALL games.
+     * Fetches a booking code from the bookmaker and saves it as ONE BettingSlip
+     * containing ALL games in the selections JSON column.
+     *
+     * Called by:
+     *   - AdminGameController#previewBookingCode  (preview only, not saved)
+     *   - AdminGameController#createSlipFromCode  (fetch + save in one step)
      *
      * The slip stores:
-     *  - bookmaker + bookingCode       → shown on the slip card
-     *  - totalOdds                     → combined odds of all games
-     *  - selections (JSON column)      → full details of every game:
-     *                                    homeTeam, awayTeam, league, country,
-     *                                    market, outcome, odds, kickoffTime,
-     *                                    matchStatus, score, isWinning, eventId
-     *  - description                   → human-readable summary
-     *  - type (FREE/VIP)               → access control
-     *  - published                     → visibility
+     *   bookmaker + bookingCode  → shown on slip card header
+     *   totalOdds                → combined product of all selection odds
+     *   selections (JSON)        → full array of every game:
+     *                              homeTeam, awayTeam, league, country,
+     *                              market, outcome, odds, kickoffTime,
+     *                              matchStatus, score, isWinning, eventId
+     *   totalSelections          → count of games in slip
+     *   deadline                 → Sportybet code expiry datetime string
+     *   description              → human-readable one-line-per-game summary
      *
-     * When user clicks the slip → frontend reads selections JSON
-     * and renders each game as an individual row inside the slip detail view.
-     *
-     * @param code      e.g. "8RF5L8"
-     * @param bookmaker "sportybet-gh" | "sportybet-ng" | "betway-gh"
-     * @param vipOnly   mark slip as VIP
-     * @param published publish immediately
+     * Frontend reads the selections JSON and renders each game as a row
+     * inside the slip detail modal / card.
      */
     public BettingSlipResponse createSlipFromBookingCode(
             String code, String bookmaker, boolean vipOnly, boolean published) {
 
-        // ── 1. Fetch all games from bookmaker via ScrapeOps ────────────────
+        // 1. Fetch from bookmaker
         BookingCodeService.BookingCodeResult result = bookingCodeService.fetch(code, bookmaker);
 
         log.info("🎫 Building slip from code={} bookmaker={} games={} odds={}",
                 code, bookmaker, result.totalSelections(), result.totalOdds());
 
-        // ── 2. Serialize selections → JSON string for DB storage ──────────
-        // Each selection becomes a JSON object with all game details
+        // 2. Serialize selections to JSON
         List<Map<String, Object>> selectionsData = result.selections().stream()
                 .map(sel -> {
                     Map<String, Object> m = new java.util.LinkedHashMap<>();
-                    m.put("homeTeam",        sel.homeTeam());
-                    m.put("awayTeam",        sel.awayTeam());
-                    m.put("league",          sel.league());
-                    m.put("country",         sel.country());
-                    m.put("sport",           sel.sport());
-                    m.put("market",          sel.market());
-                    m.put("outcome",         sel.outcome());
-                    m.put("odds",            sel.odds());
-                    m.put("kickoffTime",     sel.kickoffTime());
-                    m.put("kickoffTimestamp",sel.kickoffTimestamp());
-                    m.put("matchStatus",     sel.matchStatus());
-                    m.put("score",           sel.score());
-                    m.put("playedTime",      sel.playedTime());
-                    m.put("statusCode",      sel.statusCode());
-                    m.put("bookingStatus",   sel.bookingStatus());
-                    m.put("isWinning",       sel.isWinning());
-                    m.put("eventId",         sel.eventId());
-                    m.put("gameId",          sel.gameId());
+                    m.put("homeTeam",         sel.homeTeam());
+                    m.put("awayTeam",         sel.awayTeam());
+                    m.put("league",           sel.league());
+                    m.put("country",          sel.country());
+                    m.put("sport",            sel.sport());
+                    m.put("market",           sel.market());
+                    m.put("outcome",          sel.outcome());
+                    m.put("odds",             sel.odds());
+                    m.put("kickoffTime",      sel.kickoffTime());
+                    m.put("kickoffTimestamp", sel.kickoffTimestamp());
+                    m.put("matchStatus",      sel.matchStatus());
+                    m.put("score",            sel.score());
+                    m.put("playedTime",       sel.playedTime());
+                    m.put("statusCode",       sel.statusCode());
+                    m.put("bookingStatus",    sel.bookingStatus());
+                    m.put("isWinning",        sel.isWinning());
+                    m.put("eventId",          sel.eventId());
+                    m.put("gameId",           sel.gameId());
                     return m;
                 })
                 .collect(Collectors.toList());
@@ -583,19 +622,18 @@ public class GameService {
         try {
             selectionsJson = objectMapper.writeValueAsString(selectionsData);
         } catch (Exception e) {
-            log.warn("⚠ Could not serialize selections to JSON: {}", e.getMessage());
+            log.warn("⚠ Could not serialize selections: {}", e.getMessage());
             selectionsJson = "[]";
         }
 
-        // ── 3. Build human-readable description ────────────────────────────
-        // e.g. "Club Necaxa vs Club Tijuana (Liga MX) — Home @ 2.20"
+        // 3. Build human-readable description
         String description = result.selections().stream()
                 .map(sel -> String.format("%s vs %s (%s) — %s @ %.2f",
                         sel.homeTeam(), sel.awayTeam(),
                         sel.league(), sel.outcome(), sel.odds()))
                 .collect(Collectors.joining("\n"));
 
-        // ── 4. Print console summary ───────────────────────────────────────
+        // 4. Console summary
         System.out.println();
         System.out.println("🔄 Creating BettingSlip from booking code...");
         System.out.printf ("   Bookmaker  : %s%n", result.bookmaker());
@@ -613,15 +651,15 @@ public class GameService {
                         sel.kickoffTime(), sel.matchStatus())
         );
 
-        // ── 5. Build and save one BettingSlip ─────────────────────────────
+        // 5. Persist one BettingSlip
         BettingSlip slip = BettingSlip.builder()
                 .bookmaker(result.bookmaker())
                 .bookingCode(result.bookingCode())
                 .totalOdds(result.totalOdds())
                 .description(description)
-                .selections(selectionsJson)          // ← JSON array of all games
-                .totalSelections(result.totalSelections()) // ← game count
-                .deadline(result.deadline())         // ← code expiry
+                .selections(selectionsJson)
+                .totalSelections(result.totalSelections())
+                .deadline(result.deadline())
                 .type(vipOnly ? PredictionType.VIP : PredictionType.FREE)
                 .published(published)
                 .status(SlipStatus.ACTIVE)
@@ -631,7 +669,7 @@ public class GameService {
 
         BettingSlip saved = bettingSlipRepo.save(slip);
 
-        log.info("✅ Slip saved! id={} code={} games={} odds={}",
+        log.info("✅ Slip saved: id={} code={} games={} odds={}",
                 saved.getId(), saved.getBookingCode(),
                 saved.getTotalSelections(), saved.getTotalOdds());
 
@@ -687,13 +725,17 @@ public class GameService {
 
     private GameResponse mapGamePublic(Game g) {
         return GameResponse.builder()
-                .id(g.getId()).homeTeam(g.getHomeTeam()).awayTeam(g.getAwayTeam())
+                .id(g.getId())
+                .homeTeam(g.getHomeTeam()).awayTeam(g.getAwayTeam())
                 .league(g.getLeague()).leagueLogo(g.getLeagueLogo())
                 .homeLogo(g.getHomeLogo()).awayLogo(g.getAwayLogo())
                 .kickoffTime(g.getKickoffTime()).status(g.getStatus())
                 .build();
     }
 
+    /**
+     * Full slip mapper — includes all multi-game fields plus legacy single-game link.
+     */
     private BettingSlipResponse mapSlip(BettingSlip s) {
         BettingSlipResponse.BettingSlipResponseBuilder builder = BettingSlipResponse.builder()
                 .id(s.getId())
@@ -708,12 +750,12 @@ public class GameService {
                 .validUntil(s.getValidUntil())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())
-                // ── New fields for multi-game slips ──────────────────────
-                .selections(s.getSelections())          // JSON string of all games
-                .totalSelections(s.getTotalSelections()) // e.g. 4
+                // ── Multi-game slip fields ─────────────────────────────────
+                .selections(s.getSelections())           // JSON string of all games
+                .totalSelections(s.getTotalSelections()) // e.g. 6
                 .deadline(s.getDeadline());              // code expiry
 
-        // Legacy single-game link (still supported)
+        // Legacy single-game link (still supported for old slips)
         if (s.getGame() != null) {
             Game g = s.getGame();
             builder.gameId(g.getId())
@@ -731,15 +773,21 @@ public class GameService {
         return builder.build();
     }
 
+    /**
+     * Public slip mapper — hides booking code, still shows game details.
+     */
     private BettingSlipResponse mapSlipPublic(BettingSlip s) {
         return BettingSlipResponse.builder()
-                .id(s.getId()).bookmaker(s.getBookmaker())
-                .bookingCode("****")                    // hide code for public
+                .id(s.getId())
+                .bookmaker(s.getBookmaker())
+                .bookingCode("****")           // hide for non-subscribers
                 .description(s.getDescription())
                 .totalOdds(s.getTotalOdds())
-                .type(s.getType()).status(s.getStatus())
+                .type(s.getType())
+                .status(s.getStatus())
                 .totalSelections(s.getTotalSelections())
-                .selections(s.getSelections())          // still show game details
+                .selections(s.getSelections()) // show game details, not the code
+                .deadline(s.getDeadline())
                 .build();
     }
 }
