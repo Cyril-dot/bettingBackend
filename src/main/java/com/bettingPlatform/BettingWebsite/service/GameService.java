@@ -34,6 +34,7 @@ public class GameService {
     private final CloudinaryService cloudinaryService;
     private final VipSubscriptionRepo vipSubscriptionRepo;
     private final UserRepo userRepo;
+    private final BookingCodeService bookingCodeService;
 
     private static final ZoneId APP_ZONE = ZoneId.of("UTC");
 
@@ -151,7 +152,6 @@ public class GameService {
                 .map(this::bookGame)
                 .collect(Collectors.toList());
     }
-
 
     public GameResponse unpublishGame(UUID gameId) {
         Game game = gameRepo.findById(gameId)
@@ -438,50 +438,35 @@ public class GameService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // FUTURE GAMES — all published games, no vip filter
-    // Available to any authenticated user.
-    // VipOnly games ARE included — the frontend/admin decides
-    // whether to show them based on the vipOnly flag in the response.
+    // FUTURE GAMES
     // ═══════════════════════════════════════════════════════════
 
-    /** Tomorrow's games — all published, vipOnly flag included in response */
     public List<GameResponse> getTomorrowGames() {
         LocalDate tomorrow = LocalDate.now(APP_ZONE).plusDays(1);
         return gameRepo.findPublishedGamesBetween(startOf(tomorrow), endOf(tomorrow))
-                .stream()
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .stream().map(this::mapGame).collect(Collectors.toList());
     }
 
-    /** Day after tomorrow — all published */
     public List<GameResponse> getDayAfterTomorrowGames() {
         LocalDate dat = LocalDate.now(APP_ZONE).plusDays(2);
         return gameRepo.findPublishedGamesBetween(startOf(dat), endOf(dat))
-                .stream()
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .stream().map(this::mapGame).collect(Collectors.toList());
     }
 
-    /** Next 7 days from end of today — all published */
     public List<GameResponse> getNextWeekGames() {
         LocalDateTime from = endOfToday().plusSeconds(1);
         LocalDateTime to   = LocalDate.now(APP_ZONE).plusDays(7).atTime(LocalTime.MAX);
         return gameRepo.findPublishedGamesBetween(from, to)
-                .stream()
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .stream().map(this::mapGame).collect(Collectors.toList());
     }
 
-    /** Games on any specific date — all published */
     public List<GameResponse> getGamesByDate(LocalDate date) {
         return gameRepo.findPublishedGamesBetween(startOf(date), endOf(date))
-                .stream()
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .stream().map(this::mapGame).collect(Collectors.toList());
     }
 
     // ═══════════════════════════════════════════════════════════
-    // VIP USER — existing methods
+    // VIP USER
     // ═══════════════════════════════════════════════════════════
 
     public List<GameResponse> getVipTodayGames(UserPrincipal userPrincipal) {
@@ -604,6 +589,71 @@ public class GameService {
                 .filter(g -> !g.isVipOnly())
                 .filter(g -> g.getKickoffTime().isAfter(cutoff))
                 .map(this::mapGame).collect(Collectors.toList());
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BOOKING CODE — Auto-create slip from bookmaker share URL
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Fetch a booking code from the bookmaker's API, then auto-create a BettingSlip
+     * pre-populated with selections, total odds, and bookmaker name.
+     *
+     * @param code       the raw booking code e.g. "ABC123"
+     * @param bookmaker  "sportybet-gh" | "sportybet-ng" | "betway-gh"
+     * @param vipOnly    whether to mark the created slip as VIP
+     * @param published  whether to publish immediately
+     */
+    public BettingSlipResponse createSlipFromBookingCode(
+            String code,
+            String bookmaker,
+            boolean vipOnly,
+            boolean published
+    ) {
+        // 1. Fetch and parse — prints raw JSON + each selection to console
+        BookingCodeService.BookingCodeResult result = bookingCodeService.fetch(code, bookmaker);
+
+        System.out.println();
+        System.out.println("🔄 Creating BettingSlip from booking code result...");
+        System.out.printf ("   Bookmaker  : %s%n", result.bookmaker());
+        System.out.printf ("   Code       : %s%n", result.bookingCode());
+        System.out.printf ("   Total Odds : %.2f%n", result.totalOdds());
+        System.out.printf ("   Selections : %d games%n", result.totalSelections());
+        System.out.printf ("   VIP Only   : %s%n", vipOnly);
+        System.out.printf ("   Published  : %s%n", published);
+
+        // 2. Build human-readable description from selections
+        StringBuilder description = new StringBuilder();
+        for (BookingCodeService.SlipSelection sel : result.selections()) {
+            description.append(String.format(
+                    "%s vs %s (%s) — %s @ %.2f\n",
+                    sel.homeTeam(), sel.awayTeam(),
+                    sel.league(), sel.outcome(), sel.odds()
+            ));
+        }
+        System.out.println();
+        System.out.println("📝 Generated description:");
+        System.out.println(description);
+
+        // 3. Build and save BettingSlip
+        BettingSlip slip = BettingSlip.builder()
+                .bookmaker(result.bookmaker())
+                .bookingCode(result.bookingCode())
+                .totalOdds(result.totalOdds())
+                .description(description.toString().trim())
+                .type(vipOnly ? PredictionType.VIP : PredictionType.FREE)
+                .published(published)
+                .createdAt(LocalDateTime.now(APP_ZONE))
+                .updatedAt(LocalDateTime.now(APP_ZONE))
+                .build();
+
+        BettingSlip saved = bettingSlipRepo.save(slip);
+
+        System.out.printf("✅ BettingSlip saved! ID: %s%n", saved.getId());
+        log.info("🎫 Slip auto-created from code {} [{}]: id={}, odds={}, selections={}",
+                code, bookmaker, saved.getId(), result.totalOdds(), result.totalSelections());
+
+        return mapSlip(saved);
     }
 
     // ═══════════════════════════════════════════════════════════

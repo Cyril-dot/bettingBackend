@@ -2,6 +2,8 @@ package com.bettingPlatform.BettingWebsite.controller;
 
 import com.bettingPlatform.BettingWebsite.Config.Security.AdminPrincipal;
 import com.bettingPlatform.BettingWebsite.dto.*;
+import com.bettingPlatform.BettingWebsite.service.BookingCodeService;
+import com.bettingPlatform.BettingWebsite.service.BookingCodeService.BookingCodeResult;
 import com.bettingPlatform.BettingWebsite.service.GameService;
 import com.bettingPlatform.BettingWebsite.service.ScheduledFetchService;
 import jakarta.validation.Valid;
@@ -33,6 +35,7 @@ public class AdminGameController {
     private final GameService            gameService;
     private final ScheduledFetchService  scheduledFetchService;
     private final SimpMessagingTemplate  messagingTemplate;
+    private final BookingCodeService     bookingCodeService;
 
     // ─────────────────────────────────────────────────────────────
     // Game Queries
@@ -202,9 +205,9 @@ public class AdminGameController {
                         "fixtures",   "POST /api/v1/admin/games/fixtures/refresh"
                 ),
                 "schedulerIntervals", Map.of(
-                        "liveScores",  "30s",
-                        "fixtures",    "30min",
-                        "odds",        "3hr"
+                        "liveScores", "30s",
+                        "fixtures",   "30min",
+                        "odds",       "3hr"
                 )
         );
         return ResponseEntity.ok(ApiResponse.success("WebSocket info", info));
@@ -235,7 +238,6 @@ public class AdminGameController {
         }
     }
 
-    /** POST /api/v1/admin/games/book/bulk */
     /** POST /api/v1/admin/games/book/bulk */
     @PostMapping("/book/bulk")
     public ResponseEntity<ApiResponse<List<GameResponse>>> bookMultipleGames(
@@ -373,6 +375,86 @@ public class AdminGameController {
             log.error("[ADMIN][SLIPS] Create failed → reason={}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Failed to create slip"));
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/games/slips/from-code
+     *
+     * Fetch a booking code from the bookmaker's share URL, parse all selections,
+     * then auto-create a BettingSlip pre-populated with teams, odds, and description.
+     *
+     * Params:
+     *   code       — the booking code e.g. "ABC123"
+     *   bookmaker  — "sportybet-gh" | "sportybet-ng" | "betway-gh"
+     *   vipOnly    — true/false (default false)
+     *   published  — true/false (default false)
+     *
+     * Example:
+     *   POST /api/v1/admin/games/slips/from-code
+     *        ?code=ABC123&bookmaker=sportybet-gh&vipOnly=false&published=true
+     */
+    @PostMapping("/slips/from-code")
+    public ResponseEntity<ApiResponse<BettingSlipResponse>> createSlipFromBookingCode(
+            @AuthenticationPrincipal AdminPrincipal adminPrincipal,
+            @RequestParam String code,
+            @RequestParam String bookmaker,
+            @RequestParam(defaultValue = "false") boolean vipOnly,
+            @RequestParam(defaultValue = "false") boolean published) {
+        log.info("[ADMIN][SLIPS] From booking code → code={} bookmaker={} vipOnly={} published={} requestedBy={}",
+                code, bookmaker, vipOnly, published, adminPrincipal.getSellerId());
+        try {
+            BettingSlipResponse response = gameService.createSlipFromBookingCode(code, bookmaker, vipOnly, published);
+            log.info("[ADMIN][SLIPS] Slip created from code → id={} bookmaker={} odds={}",
+                    response.getId(), response.getBookmaker(), response.getTotalOdds());
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success("Slip auto-created from booking code", response));
+        } catch (RuntimeException e) {
+            log.warn("[ADMIN][SLIPS] From-code failed → code={} reason={}", code, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("Failed to fetch booking code: " + e.getMessage()));
+        } catch (Exception e) {
+            log.error("[ADMIN][SLIPS] From-code error → reason={}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Unexpected error fetching booking code"));
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/games/slips/preview-code
+     *
+     * Preview a booking code — fetch and parse it WITHOUT saving anything.
+     * Useful for the admin to inspect selections before deciding to create a slip.
+     *
+     * Params:
+     *   code      — the booking code e.g. "ABC123"
+     *   bookmaker — "sportybet-gh" | "sportybet-ng" | "betway-gh"
+     *
+     * Example:
+     *   GET /api/v1/admin/games/slips/preview-code?code=ABC123&bookmaker=sportybet-gh
+     */
+    @GetMapping("/slips/preview-code")
+    public ResponseEntity<ApiResponse<BookingCodeResult>> previewBookingCode(
+            @AuthenticationPrincipal AdminPrincipal adminPrincipal,
+            @RequestParam String code,
+            @RequestParam String bookmaker) {
+        log.info("[ADMIN][SLIPS] Preview code → code={} bookmaker={} requestedBy={}",
+                code, bookmaker, adminPrincipal.getSellerId());
+        try {
+            BookingCodeResult result = bookingCodeService.fetch(code, bookmaker);
+            log.info("[ADMIN][SLIPS] Preview done → code={} selections={} totalOdds={}",
+                    code, result.totalSelections(), result.totalOdds());
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Booking code preview — " + result.totalSelections() + " selections @ " + result.totalOdds(),
+                    result));
+        } catch (RuntimeException e) {
+            log.warn("[ADMIN][SLIPS] Preview failed → code={} reason={}", code, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("Failed to fetch booking code: " + e.getMessage()));
+        } catch (Exception e) {
+            log.error("[ADMIN][SLIPS] Preview error → reason={}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Unexpected error previewing booking code"));
         }
     }
 
