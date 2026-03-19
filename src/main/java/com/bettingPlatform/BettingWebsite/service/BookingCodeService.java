@@ -21,15 +21,16 @@ import java.util.regex.Pattern;
  *  1. Admin enters a booking code + bookmaker
  *  2. GET https://convertbetcodes.com/bet-viewer → extract CSRF token
  *  3. POST https://convertbetcodes.com/bet-viewer/retrieve_bet_code
- *       body: { csrf_new{ts}, code, origin_bookie }
- *  4. Response: { "view": "<html>...", "link": "..." }
- *  5. Parse HTML fragment → SlipSelection list
+ *       multipart form: { csrf_new{ts}, code, origin_bookie }
+ *  4. Response: { "view": "<html fragment>", "link": "..." }
+ *  5. Parse HTML fragment with Jsoup → SlipSelection list
  *  6. Return BookingCodeResult
  *
- * ── Bookmaker codes for convertbetcodes ──────────────────────────────────────
- *  sportybet-gh  → sportybet:gh
- *  sportybet-ng  → sportybet:ng
- *  betway-gh     → betway:gh
+ * ── IMPORTANT: origin_bookie values ──────────────────────────────────────────
+ *  These MUST match exactly what appears in the convertbetcodes dropdown:
+ *  sportybet-gh  → "Sportybet -Ghana"
+ *  sportybet-ng  → "Sportybet -Nigeria"
+ *  betway-gh     → "Betway -Ghana"
  */
 @Service
 @Slf4j
@@ -73,26 +74,30 @@ public class BookingCodeService {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Main entry point — routes bookmaker key to convertbetcodes origin_bookie value.
+     * Main entry point.
      *
      * @param bookingCode  e.g. "8RF5L8"
      * @param bookmaker    "sportybet-gh" | "sportybet-ng" | "betway-gh"
      */
     public BookingCodeResult fetch(String bookingCode, String bookmaker) {
-        String code         = bookingCode.trim().toUpperCase();
-        String originBookie = resolveOriginBookie(bookmaker);
+        String code          = bookingCode.trim().toUpperCase();
+        String originBookie  = resolveOriginBookie(bookmaker);
         String bookmakerName = resolveBookmakerName(bookmaker);
 
-        log.info("📡 Fetching code={} bookmaker={} → originBookie={}", code, bookmaker, originBookie);
+        log.info("📡 Fetching code={} bookmaker={} → origin_bookie='{}'",
+                code, bookmaker, originBookie);
+
         return fetchViaConvertBetCodes(code, originBookie, bookmakerName);
     }
 
-    // ── Bookmaker key → convertbetcodes origin_bookie value ───────────────────
+    // ── Map our bookmaker key → exact convertbetcodes dropdown value ───────────
+
     private String resolveOriginBookie(String bookmaker) {
         return switch (bookmaker.toLowerCase().trim()) {
-            case "sportybet-gh", "sportybet_gh", "sportybet ghana"   -> "sportybet:gh";
-            case "sportybet-ng", "sportybet_ng", "sportybet nigeria" -> "sportybet:ng";
-            case "betway-gh",    "betway_gh",    "betway ghana"      -> "betway:gh";
+            // ✅ These match the EXACT option text in the convertbetcodes dropdown
+            case "sportybet-gh", "sportybet_gh", "sportybet ghana"   -> "Sportybet -Ghana";
+            case "sportybet-ng", "sportybet_ng", "sportybet nigeria" -> "Sportybet -Nigeria";
+            case "betway-gh",    "betway_gh",    "betway ghana"      -> "Betway -Ghana";
             default -> throw new RuntimeException(
                     "Unsupported bookmaker: '" + bookmaker + "'. " +
                             "Accepted: sportybet-gh | sportybet-ng | betway-gh");
@@ -109,31 +114,33 @@ public class BookingCodeService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // STEP 1 + 2 + 3 — CSRF → POST → parse
+    // STEP 1: GET page → extract CSRF
+    // STEP 2: POST retrieve_bet_code
+    // STEP 3: Parse JSON → extract "view" HTML
+    // STEP 4: Parse HTML → SlipSelection list
     // ═══════════════════════════════════════════════════════════════════════════
 
     private BookingCodeResult fetchViaConvertBetCodes(
             String code, String originBookie, String bookmakerName) {
         try {
 
-            // ── Step 1: GET /bet-viewer → extract CSRF token ───────────────────
-            log.info("  ▶ Step 1: GET {} to fetch CSRF token", CBC_VIEWER_URL);
+            // ── Step 1: GET /bet-viewer → extract CSRF ─────────────────────────
+            log.info("  ▶ Step 1: GET {} — extracting CSRF token", CBC_VIEWER_URL);
 
             Document viewerPage = Jsoup.connect(CBC_VIEWER_URL)
                     .userAgent(USER_AGENT)
-                    .header("Accept",          "text/html,application/xhtml+xml,*/*")
-                    .header("Accept-Language", "en-US,en;q=0.9")
-                    .header("Sec-Ch-Ua",       "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"")
+                    .header("Accept",             "text/html,application/xhtml+xml,*/*")
+                    .header("Accept-Language",    "en-US,en;q=0.9")
+                    .header("Sec-Ch-Ua",          "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"")
                     .header("Sec-Ch-Ua-Mobile",   "?0")
                     .header("Sec-Ch-Ua-Platform", "\"Windows\"")
                     .timeout(TIMEOUT_MS)
                     .get();
 
-            // Extract CSRF — input named csrf_new{timestamp}
+            // Extract CSRF — input name starts with csrf_
             String csrfName  = null;
             String csrfValue = null;
 
-            // Try via Jsoup selector first
             Elements csrfInputs = viewerPage.select("input[name^=csrf_]");
             if (!csrfInputs.isEmpty()) {
                 Element el = csrfInputs.first();
@@ -142,10 +149,11 @@ public class BookingCodeService {
                 log.info("  ✅ CSRF via selector: {}={}", csrfName, csrfValue);
             }
 
-            // Fallback: regex on raw HTML
+            // Regex fallback
             if (csrfName == null || csrfValue == null) {
                 String html = viewerPage.html();
-                Pattern p = Pattern.compile("name=[\"'](csrf_new\\d+)[\"']\\s+value=[\"']([a-f0-9]+)[\"']");
+                Pattern p = Pattern.compile(
+                        "name=[\"'](csrf_new\\d+)[\"']\\s+value=[\"']([a-f0-9]+)[\"']");
                 Matcher m = p.matcher(html);
                 if (m.find()) {
                     csrfName  = m.group(1);
@@ -155,14 +163,14 @@ public class BookingCodeService {
             }
 
             if (csrfName == null || csrfValue == null) {
-                // Proceed without CSRF — convertbetcodes may not require it for all requests
-                log.warn("  ⚠ CSRF not found — proceeding without it");
+                log.warn("  ⚠ CSRF not found — proceeding anyway");
                 csrfName  = "csrf_new" + System.currentTimeMillis();
                 csrfValue = "";
             }
 
             // ── Step 2: POST /bet-viewer/retrieve_bet_code ─────────────────────
-            log.info("  ▶ Step 2: POST {} code={} bookie={}", CBC_FETCH_URL, code, originBookie);
+            log.info("  ▶ Step 2: POST {} | code={} origin_bookie='{}'",
+                    CBC_FETCH_URL, code, originBookie);
 
             org.jsoup.Connection.Response response = Jsoup.connect(CBC_FETCH_URL)
                     .userAgent(USER_AGENT)
@@ -176,20 +184,22 @@ public class BookingCodeService {
                     .header("Sec-Fetch-Mode",     "cors")
                     .header("Sec-Fetch-Site",     "same-origin")
                     .referrer(CBC_VIEWER_URL)
-                    .data(csrfName,       csrfValue)
-                    .data("code",         code)
-                    .data("origin_bookie", originBookie)
+                    .data(csrfName,        csrfValue)
+                    .data("code",          code)
+                    .data("origin_bookie", originBookie)   // ← exact dropdown value
                     .method(org.jsoup.Connection.Method.POST)
                     .ignoreContentType(true)
                     .timeout(TIMEOUT_MS)
                     .execute();
 
             String responseBody = response.body();
-            log.info("  ✅ POST HTTP {} — {} chars", response.statusCode(), responseBody.length());
+            log.info("  ✅ POST HTTP {} — {} chars",
+                    response.statusCode(), responseBody.length());
 
             printRaw("convertbetcodes", code, responseBody);
 
-            // ── Step 3: Parse JSON → extract "view" HTML fragment ──────────────
+            // ── Step 3: Parse JSON response ────────────────────────────────────
+            // Response shape: { "view": "<html>...", "link": "https://..." }
             ObjectMapper mapper = new ObjectMapper();
             JsonNode json = mapper.readTree(responseBody);
 
@@ -197,9 +207,12 @@ public class BookingCodeService {
             String link     = json.path("link").asText("");
 
             if (viewHtml.isBlank()) {
+                // Log full response to help debug
+                log.error("  ❌ Empty view returned. Full response: {}", responseBody);
                 throw new RuntimeException(
-                        "convertbetcodes returned empty view for code: " + code +
-                                ". The code may be invalid or expired.");
+                        "convertbetcodes returned an empty result for code: " + code +
+                                ". The code may be invalid, expired, or the bookmaker value is wrong." +
+                                " Full response: " + responseBody.substring(0, Math.min(300, responseBody.length())));
             }
 
             log.info("  ✅ HTML fragment: {} chars | link: {}", viewHtml.length(), link);
@@ -219,16 +232,15 @@ public class BookingCodeService {
     // ═══════════════════════════════════════════════════════════════════════════
     // HTML PARSER
     //
-    // Actual HTML structure from convertbetcodes response (confirmed from network tab):
+    // Confirmed structure from network tab response:
     //
-    // Summary:
-    //   <span>4events @55.87 odds</span>
+    // Summary:  <span>4events @55.87 odds</span>
     //
     // Each game — <li class="list-item">:
-    //   <p class="tx-12 ... tx-color-03">1. Mexico Liga MX, Clausura</p>   ← league
-    //   <p class="tx-medium ...">Club Necaxa - Club Tijuana</p>             ← home - away
-    //   <p class="tx-12 ...">1X2 <b><span class="badg">Home</span></b></p> ← market + outcome
-    //   <small class="badge bade-dark badge-pill">@2.20 odds</small>        ← odds
+    //   <p class="tx-12 tx-color-03">1. Mexico Liga MX, Clausura</p>   ← league
+    //   <p class="tx-medium">Club Necaxa - Club Tijuana</p>             ← home - away
+    //   <p class="tx-12">1X2 <b><span class="badg">Home</span></b></p> ← market + outcome
+    //   <small class="badge bade-dark badge-pill">@2.20 odds</small>    ← odds
     //   <small class="badge tx-success bade-dark badge-pill">Mar 21, 02:00.utc</small> ← kickoff
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -246,15 +258,15 @@ public class BookingCodeService {
                     try {
                         String oddsStr = text.replaceAll(".*@([\\d.]+)\\s*odds.*", "$1");
                         totalOdds = Double.parseDouble(oddsStr);
-                        log.info("  📊 Total odds: {}", totalOdds);
+                        log.info("  📊 Total odds from summary: {}", totalOdds);
                     } catch (Exception ignored) {}
                     break;
                 }
             }
 
-            // ── Parse each game ────────────────────────────────────────────────
+            // ── Parse each game — <li class="list-item"> ──────────────────────
             Elements gameItems = doc.select("li.list-item");
-            log.info("  🔍 Found {} game items", gameItems.size());
+            log.info("  🔍 Found {} game items in HTML", gameItems.size());
 
             for (Element item : gameItems) {
                 Elements paragraphs = item.select("p");
@@ -317,7 +329,7 @@ public class BookingCodeService {
                     homeTeam = teams;
                 }
 
-                // Skip empty rows
+                // Skip empty / non-game rows
                 if (homeTeam.equals("Unknown") && league.isBlank()) continue;
 
                 SlipSelection sel = new SlipSelection(
@@ -342,7 +354,7 @@ public class BookingCodeService {
                                 ". The code may be expired or invalid.");
             }
 
-            // Recalculate total odds if not in summary
+            // Recalculate total odds if not found in summary
             if (totalOdds == 0.0) {
                 totalOdds = selections.stream()
                         .mapToDouble(SlipSelection::odds)
