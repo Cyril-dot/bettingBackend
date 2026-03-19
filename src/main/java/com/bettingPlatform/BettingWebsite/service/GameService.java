@@ -5,6 +5,7 @@ import com.bettingPlatform.BettingWebsite.dto.*;
 import com.bettingPlatform.BettingWebsite.entity.*;
 import com.bettingPlatform.BettingWebsite.entity.repos.*;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -35,24 +36,14 @@ public class GameService {
     private final VipSubscriptionRepo vipSubscriptionRepo;
     private final UserRepo userRepo;
     private final BookingCodeService bookingCodeService;
+    private final ObjectMapper objectMapper;
 
     private static final ZoneId APP_ZONE = ZoneId.of("UTC");
 
-    private LocalDateTime startOfToday() {
-        return LocalDate.now(APP_ZONE).atStartOfDay();
-    }
-
-    private LocalDateTime endOfToday() {
-        return LocalDate.now(APP_ZONE).atTime(LocalTime.MAX);
-    }
-
-    private LocalDateTime startOf(LocalDate date) {
-        return date.atStartOfDay();
-    }
-
-    private LocalDateTime endOf(LocalDate date) {
-        return date.atTime(LocalTime.MAX);
-    }
+    private LocalDateTime startOfToday() { return LocalDate.now(APP_ZONE).atStartOfDay(); }
+    private LocalDateTime endOfToday()   { return LocalDate.now(APP_ZONE).atTime(LocalTime.MAX); }
+    private LocalDateTime startOf(LocalDate date) { return date.atStartOfDay(); }
+    private LocalDateTime endOf(LocalDate date)   { return date.atTime(LocalTime.MAX); }
 
     private record LeagueKey(String country, String league) {}
 
@@ -68,8 +59,7 @@ public class GameService {
     private boolean isTop5League(Game game) {
         return TOP_5_LEAGUES.stream().anyMatch(l ->
                 l.country().equalsIgnoreCase(game.getCountry()) &&
-                        l.league().equalsIgnoreCase(game.getLeague())
-        );
+                        l.league().equalsIgnoreCase(game.getLeague()));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -78,26 +68,20 @@ public class GameService {
 
     public List<GameResponse> getTop5LeagueGames() {
         return gameRepo.findAll().stream()
-                .filter(Game::isPublished)
-                .filter(this::isTop5League)
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .filter(Game::isPublished).filter(this::isTop5League)
+                .map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<GameResponse> searchTop5LeagueGames(String keyword) {
         if (keyword == null || keyword.isBlank()) return List.of();
         String search = keyword.toLowerCase();
         return gameRepo.findAll().stream()
-                .filter(Game::isPublished)
-                .filter(this::isTop5League)
-                .filter(g ->
-                        g.getHomeTeam().toLowerCase().contains(search) ||
-                                g.getAwayTeam().toLowerCase().contains(search) ||
-                                g.getLeague().toLowerCase().contains(search) ||
-                                g.getCountry().toLowerCase().contains(search)
-                )
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .filter(Game::isPublished).filter(this::isTop5League)
+                .filter(g -> g.getHomeTeam().toLowerCase().contains(search) ||
+                        g.getAwayTeam().toLowerCase().contains(search) ||
+                        g.getLeague().toLowerCase().contains(search) ||
+                        g.getCountry().toLowerCase().contains(search))
+                .map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<GameResponse> searchGames(String keyword) {
@@ -105,14 +89,11 @@ public class GameService {
         String search = keyword.toLowerCase();
         return gameRepo.findAll().stream()
                 .filter(Game::isPublished)
-                .filter(g ->
-                        g.getHomeTeam().toLowerCase().contains(search) ||
-                                g.getAwayTeam().toLowerCase().contains(search) ||
-                                g.getLeague().toLowerCase().contains(search) ||
-                                g.getCountry().toLowerCase().contains(search)
-                )
-                .map(this::mapGame)
-                .collect(Collectors.toList());
+                .filter(g -> g.getHomeTeam().toLowerCase().contains(search) ||
+                        g.getAwayTeam().toLowerCase().contains(search) ||
+                        g.getLeague().toLowerCase().contains(search) ||
+                        g.getCountry().toLowerCase().contains(search))
+                .map(this::mapGame).collect(Collectors.toList());
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -127,11 +108,9 @@ public class GameService {
     public GameResponse bookGame(BookGameRequest request) {
         Game game = gameRepo.findById(request.getGameId())
                 .orElseThrow(() -> new RuntimeException("Game not found"));
-
         game.setPublished(request.isPublished());
         game.setFeatured(request.isFeatured());
         game.setVipOnly(request.isVipOnly());
-
         if (request.getHomeWinOdds() != null) game.setHomeWinOdds(request.getHomeWinOdds());
         if (request.getDrawOdds()    != null) game.setDrawOdds(request.getDrawOdds());
         if (request.getAwayWinOdds() != null) game.setAwayWinOdds(request.getAwayWinOdds());
@@ -139,39 +118,32 @@ public class GameService {
         if (request.getUnder25Odds() != null) game.setUnder25Odds(request.getUnder25Odds());
         if (request.getOver15Odds()  != null) game.setOver15Odds(request.getOver15Odds());
         if (request.getOver35Odds()  != null) game.setOver35Odds(request.getOver35Odds());
-
         game.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         Game saved = gameRepo.save(game);
-        log.info("✅ Game booked: {} vs {} — Published: {}, VIP: {}",
-                saved.getHomeTeam(), saved.getAwayTeam(), saved.isPublished(), saved.isVipOnly());
+        log.info("✅ Game booked: {} vs {}", saved.getHomeTeam(), saved.getAwayTeam());
         return mapGame(saved);
     }
 
     public List<GameResponse> bookMultipleGames(List<BookGameRequest> requests) {
-        return requests.stream()
-                .map(this::bookGame)
-                .collect(Collectors.toList());
+        return requests.stream().map(this::bookGame).collect(Collectors.toList());
     }
 
     public GameResponse unpublishGame(UUID gameId) {
-        Game game = gameRepo.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepo.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
         game.setPublished(false);
         game.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         return mapGame(gameRepo.save(game));
     }
 
     public GameResponse toggleFeatured(UUID gameId) {
-        Game game = gameRepo.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepo.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
         game.setFeatured(!game.isFeatured());
         game.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         return mapGame(gameRepo.save(game));
     }
 
     public GameResponse toggleVipOnly(UUID gameId) {
-        Game game = gameRepo.findById(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+        Game game = gameRepo.findById(gameId).orElseThrow(() -> new RuntimeException("Game not found"));
         game.setVipOnly(!game.isVipOnly());
         game.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         log.info("👑 Game {} VIP toggled: {}", gameId, game.isVipOnly());
@@ -199,9 +171,7 @@ public class GameService {
 
     public List<BettingSlipResponse> getAllSlips() {
         return bettingSlipRepo.findAllByOrderByCreatedAtDesc()
-                .stream()
-                .map(this::mapSlip)
-                .collect(Collectors.toList());
+                .stream().map(this::mapSlip).collect(Collectors.toList());
     }
 
     public BettingSlipResponse getSlipById(UUID slipId) {
@@ -238,23 +208,18 @@ public class GameService {
         Map<String, Object> uploadResult = cloudinaryService.uploadImage(image, "bettingPlatform/slips");
         slip.setImageUrl((String) uploadResult.get("secure_url"));
         slip.setUpdatedAt(LocalDateTime.now(APP_ZONE));
-        BettingSlip saved = bettingSlipRepo.save(slip);
-        log.info("📸 Slip image uploaded: {}", saved.getBookingCode());
-        return mapSlip(saved);
+        return mapSlip(bettingSlipRepo.save(slip));
     }
 
     public BettingSlipResponse createSlipWithImage(CreateBettingSlipRequest request, MultipartFile image) throws IOException {
         BettingSlipResponse slip = createBettingSlip(request);
-        if (image != null && !image.isEmpty()) {
-            return uploadSlipImage(slip.getId(), image);
-        }
+        if (image != null && !image.isEmpty()) return uploadSlipImage(slip.getId(), image);
         return slip;
     }
 
     public BettingSlipResponse updateSlip(UUID slipId, CreateBettingSlipRequest request, MultipartFile image) throws IOException {
         BettingSlip slip = bettingSlipRepo.findById(slipId)
                 .orElseThrow(() -> new RuntimeException("Slip not found: " + slipId));
-
         if (request.getBookmaker()   != null) slip.setBookmaker(request.getBookmaker());
         if (request.getBookingCode() != null) slip.setBookingCode(request.getBookingCode());
         if (request.getDescription() != null) slip.setDescription(request.getDescription());
@@ -262,16 +227,13 @@ public class GameService {
         if (request.getType()        != null) slip.setType(request.getType());
         if (request.getValidUntil()  != null) slip.setValidUntil(request.getValidUntil());
         slip.setPublished(request.isPublished());
-
         if (image != null && !image.isEmpty()) {
             Map<String, Object> uploadResult = cloudinaryService.uploadImage(image, "bettingPlatform/slips");
             slip.setImageUrl((String) uploadResult.get("secure_url"));
         }
-
         if (request.getGameId() != null) {
             gameRepo.findById(request.getGameId()).ifPresent(slip::setGame);
         }
-
         slip.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         return mapSlip(bettingSlipRepo.save(slip));
     }
@@ -295,8 +257,7 @@ public class GameService {
     }
 
     public void deleteSlip(UUID slipId) {
-        if (!bettingSlipRepo.existsById(slipId))
-            throw new RuntimeException("Slip not found");
+        if (!bettingSlipRepo.existsById(slipId)) throw new RuntimeException("Slip not found");
         bettingSlipRepo.deleteById(slipId);
         log.info("🗑️ Slip deleted: {}", slipId);
     }
@@ -329,50 +290,29 @@ public class GameService {
     public BettingSlipResponse autoSettleSlip(UUID slipId) {
         BettingSlip slip = bettingSlipRepo.findById(slipId)
                 .orElseThrow(() -> new RuntimeException("Slip not found: " + slipId));
-
         if (slip.getGame() == null)
             throw new RuntimeException("Slip has no linked game — cannot auto-settle");
-
         Game game = slip.getGame();
-
         if (game.getHomeScore() == null || game.getAwayScore() == null)
-            throw new RuntimeException("Match result not available yet (no score on linked game)");
-
+            throw new RuntimeException("Match result not available yet");
         if (game.getStatus() != GameStatus.FINISHED)
             throw new RuntimeException("Match is not finished yet — status: " + game.getStatus());
 
-        String raw = (slip.getDescription() != null ? slip.getDescription() : "")
-                + " " + slip.getBookingCode();
-
+        String raw = (slip.getDescription() != null ? slip.getDescription() : "") + " " + slip.getBookingCode();
         List<String> keys = parseOutcomeKeys(raw.toUpperCase());
+        if (keys.isEmpty()) throw new RuntimeException("No prediction outcomes found in slip");
 
-        if (keys.isEmpty())
-            throw new RuntimeException("No prediction outcomes found in slip — cannot auto-settle");
-
-        int h = game.getHomeScore();
-        int a = game.getAwayScore();
-
+        int h = game.getHomeScore(), a = game.getAwayScore();
         Map<String, Boolean> results = Map.of(
-                "HOME_WIN",   h > a,
-                "AWAY_WIN",   a > h,
-                "DRAW",       h == a,
-                "BTTS",       h > 0 && a > 0,
-                "OVER_1_5",   (h + a) > 1,
-                "OVER_2_5",   (h + a) > 2,
-                "OVER_3_5",   (h + a) > 3,
-                "UNDER_2_5",  (h + a) < 3,
-                "UNDER_1_5",  (h + a) < 2,
-                "OVER_0_5",   (h + a) > 0
+                "HOME_WIN", h > a, "AWAY_WIN", a > h, "DRAW", h == a,
+                "BTTS", h > 0 && a > 0, "OVER_1_5", (h+a) > 1, "OVER_2_5", (h+a) > 2,
+                "OVER_3_5", (h+a) > 3, "UNDER_2_5", (h+a) < 3, "UNDER_1_5", (h+a) < 2, "OVER_0_5", (h+a) > 0
         );
-
         boolean allCorrect = keys.stream().allMatch(k -> Boolean.TRUE.equals(results.get(k)));
-        SlipStatus newStatus = allCorrect ? SlipStatus.WON : SlipStatus.LOST;
-        slip.setStatus(newStatus);
+        slip.setStatus(allCorrect ? SlipStatus.WON : SlipStatus.LOST);
         slip.setUpdatedAt(LocalDateTime.now(APP_ZONE));
         BettingSlip saved = bettingSlipRepo.save(slip);
-
-        log.info("🎯 Auto-settled slip {} → {} (score: {}-{}, keys: {})",
-                slipId, newStatus, h, a, keys);
+        log.info("🎯 Auto-settled slip {} → {}", slipId, saved.getStatus());
         return mapSlip(saved);
     }
 
@@ -383,14 +323,10 @@ public class GameService {
                 .filter(s -> s.getGame().getStatus() == GameStatus.FINISHED)
                 .filter(s -> s.getGame().getHomeScore() != null)
                 .collect(Collectors.toList());
-
         List<BettingSlipResponse> settled = new ArrayList<>();
         for (BettingSlip slip : pending) {
-            try {
-                settled.add(autoSettleSlip(slip.getId()));
-            } catch (Exception e) {
-                log.warn("⚠️ Could not settle slip {}: {}", slip.getId(), e.getMessage());
-            }
+            try { settled.add(autoSettleSlip(slip.getId())); }
+            catch (Exception e) { log.warn("⚠️ Could not settle slip {}: {}", slip.getId(), e.getMessage()); }
         }
         log.info("🎯 Bulk settled {} slips", settled.size());
         return settled;
@@ -398,11 +334,8 @@ public class GameService {
 
     private List<String> parseOutcomeKeys(String raw) {
         List<String> keys = new ArrayList<>();
-        String[] known = {"HOME_WIN","AWAY_WIN","DRAW","BTTS","OVER_1_5","OVER_2_5",
-                "OVER_3_5","UNDER_2_5","UNDER_1_5","OVER_0_5"};
-        for (String k : known) {
+        for (String k : new String[]{"HOME_WIN","AWAY_WIN","DRAW","BTTS","OVER_1_5","OVER_2_5","OVER_3_5","UNDER_2_5","UNDER_1_5","OVER_0_5"})
             if (raw.contains(k)) keys.add(k);
-        }
         return keys;
     }
 
@@ -412,14 +345,12 @@ public class GameService {
 
     public List<GameResponse> getRegisteredUserTodayGames() {
         return gameRepo.findTodayPublishedGames(startOfToday(), endOfToday())
-                .stream().filter(g -> !g.isVipOnly())
-                .map(this::mapGame).collect(Collectors.toList());
+                .stream().filter(g -> !g.isVipOnly()).map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<GameResponse> getRegisteredUserLiveGames() {
         return gameRepo.findByStatusAndPublishedTrue(GameStatus.LIVE)
-                .stream().filter(g -> !g.isVipOnly())
-                .map(this::mapGame).collect(Collectors.toList());
+                .stream().filter(g -> !g.isVipOnly()).map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<BettingSlipResponse> getRegisteredUserFreeSlips() {
@@ -433,8 +364,7 @@ public class GameService {
     }
 
     public GameResponse getGame(UUID id) {
-        return mapGame(gameRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Game not found")));
+        return mapGame(gameRepo.findById(id).orElseThrow(() -> new RuntimeException("Game not found")));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -456,8 +386,7 @@ public class GameService {
     public List<GameResponse> getNextWeekGames() {
         LocalDateTime from = endOfToday().plusSeconds(1);
         LocalDateTime to   = LocalDate.now(APP_ZONE).plusDays(7).atTime(LocalTime.MAX);
-        return gameRepo.findPublishedGamesBetween(from, to)
-                .stream().map(this::mapGame).collect(Collectors.toList());
+        return gameRepo.findPublishedGamesBetween(from, to).stream().map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<GameResponse> getGamesByDate(LocalDate date) {
@@ -523,11 +452,10 @@ public class GameService {
 
     public List<GameResponse> getVipPreviousGames(int days, int page, int size, UserPrincipal userPrincipal) {
         checkVipAccess(userPrincipal);
-        int safeDays = Math.min(days, 30);
-        int safeSize = Math.min(size, 50);
+        int safeDays = Math.min(days, 30), safeSize = Math.min(size, 50);
         LocalDateTime before = LocalDateTime.now(APP_ZONE);
         LocalDateTime cutoff = before.minusDays(safeDays);
-        Pageable pageable    = PageRequest.of(page, safeSize);
+        Pageable pageable = PageRequest.of(page, safeSize);
         return gameRepo.findAllPreviousGames(before, pageable).stream()
                 .filter(g -> g.getKickoffTime().isAfter(cutoff))
                 .map(this::mapGame).collect(Collectors.toList());
@@ -551,8 +479,7 @@ public class GameService {
     }
 
     public List<GameResponse> getUpcomingPublicGames() {
-        return gameRepo.findUpcomingPublicGames().stream()
-                .map(this::mapGame).collect(Collectors.toList());
+        return gameRepo.findUpcomingPublicGames().stream().map(this::mapGame).collect(Collectors.toList());
     }
 
     public List<GameResponse> getFeaturedFreeGames() {
@@ -580,11 +507,10 @@ public class GameService {
     // ═══════════════════════════════════════════════════════════
 
     public List<GameResponse> getPreviousGames(int days, int page, int size) {
-        int safeDays = Math.min(days, 30);
-        int safeSize = Math.min(size, 50);
+        int safeDays = Math.min(days, 30), safeSize = Math.min(size, 50);
         LocalDateTime before = LocalDateTime.now(APP_ZONE);
         LocalDateTime cutoff = before.minusDays(safeDays);
-        Pageable pageable    = PageRequest.of(page, safeSize);
+        Pageable pageable = PageRequest.of(page, safeSize);
         return gameRepo.findPreviousPublishedGames(before, pageable).stream()
                 .filter(g -> !g.isVipOnly())
                 .filter(g -> g.getKickoffTime().isAfter(cutoff))
@@ -592,66 +518,122 @@ public class GameService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // BOOKING CODE — Auto-create slip from bookmaker share URL
+    // BOOKING CODE — Create one slip from a multi-game code
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Fetch a booking code from the bookmaker's API, then auto-create a BettingSlip
-     * pre-populated with selections, total odds, and bookmaker name.
+     * Fetches a booking code and saves it as ONE BettingSlip containing ALL games.
      *
-     * @param code       the raw booking code e.g. "ABC123"
-     * @param bookmaker  "sportybet-gh" | "sportybet-ng" | "betway-gh"
-     * @param vipOnly    whether to mark the created slip as VIP
-     * @param published  whether to publish immediately
+     * The slip stores:
+     *  - bookmaker + bookingCode       → shown on the slip card
+     *  - totalOdds                     → combined odds of all games
+     *  - selections (JSON column)      → full details of every game:
+     *                                    homeTeam, awayTeam, league, country,
+     *                                    market, outcome, odds, kickoffTime,
+     *                                    matchStatus, score, isWinning, eventId
+     *  - description                   → human-readable summary
+     *  - type (FREE/VIP)               → access control
+     *  - published                     → visibility
+     *
+     * When user clicks the slip → frontend reads selections JSON
+     * and renders each game as an individual row inside the slip detail view.
+     *
+     * @param code      e.g. "8RF5L8"
+     * @param bookmaker "sportybet-gh" | "sportybet-ng" | "betway-gh"
+     * @param vipOnly   mark slip as VIP
+     * @param published publish immediately
      */
     public BettingSlipResponse createSlipFromBookingCode(
-            String code,
-            String bookmaker,
-            boolean vipOnly,
-            boolean published
-    ) {
-        // 1. Fetch and parse — prints raw JSON + each selection to console
+            String code, String bookmaker, boolean vipOnly, boolean published) {
+
+        // ── 1. Fetch all games from bookmaker via ScrapeOps ────────────────
         BookingCodeService.BookingCodeResult result = bookingCodeService.fetch(code, bookmaker);
 
+        log.info("🎫 Building slip from code={} bookmaker={} games={} odds={}",
+                code, bookmaker, result.totalSelections(), result.totalOdds());
+
+        // ── 2. Serialize selections → JSON string for DB storage ──────────
+        // Each selection becomes a JSON object with all game details
+        List<Map<String, Object>> selectionsData = result.selections().stream()
+                .map(sel -> {
+                    Map<String, Object> m = new java.util.LinkedHashMap<>();
+                    m.put("homeTeam",        sel.homeTeam());
+                    m.put("awayTeam",        sel.awayTeam());
+                    m.put("league",          sel.league());
+                    m.put("country",         sel.country());
+                    m.put("sport",           sel.sport());
+                    m.put("market",          sel.market());
+                    m.put("outcome",         sel.outcome());
+                    m.put("odds",            sel.odds());
+                    m.put("kickoffTime",     sel.kickoffTime());
+                    m.put("kickoffTimestamp",sel.kickoffTimestamp());
+                    m.put("matchStatus",     sel.matchStatus());
+                    m.put("score",           sel.score());
+                    m.put("playedTime",      sel.playedTime());
+                    m.put("statusCode",      sel.statusCode());
+                    m.put("bookingStatus",   sel.bookingStatus());
+                    m.put("isWinning",       sel.isWinning());
+                    m.put("eventId",         sel.eventId());
+                    m.put("gameId",          sel.gameId());
+                    return m;
+                })
+                .collect(Collectors.toList());
+
+        String selectionsJson;
+        try {
+            selectionsJson = objectMapper.writeValueAsString(selectionsData);
+        } catch (Exception e) {
+            log.warn("⚠ Could not serialize selections to JSON: {}", e.getMessage());
+            selectionsJson = "[]";
+        }
+
+        // ── 3. Build human-readable description ────────────────────────────
+        // e.g. "Club Necaxa vs Club Tijuana (Liga MX) — Home @ 2.20"
+        String description = result.selections().stream()
+                .map(sel -> String.format("%s vs %s (%s) — %s @ %.2f",
+                        sel.homeTeam(), sel.awayTeam(),
+                        sel.league(), sel.outcome(), sel.odds()))
+                .collect(Collectors.joining("\n"));
+
+        // ── 4. Print console summary ───────────────────────────────────────
         System.out.println();
-        System.out.println("🔄 Creating BettingSlip from booking code result...");
+        System.out.println("🔄 Creating BettingSlip from booking code...");
         System.out.printf ("   Bookmaker  : %s%n", result.bookmaker());
         System.out.printf ("   Code       : %s%n", result.bookingCode());
         System.out.printf ("   Total Odds : %.2f%n", result.totalOdds());
-        System.out.printf ("   Selections : %d games%n", result.totalSelections());
+        System.out.printf ("   Games      : %d%n", result.totalSelections());
+        System.out.printf ("   Deadline   : %s%n", result.deadline());
         System.out.printf ("   VIP Only   : %s%n", vipOnly);
         System.out.printf ("   Published  : %s%n", published);
-
-        // 2. Build human-readable description from selections
-        StringBuilder description = new StringBuilder();
-        for (BookingCodeService.SlipSelection sel : result.selections()) {
-            description.append(String.format(
-                    "%s vs %s (%s) — %s @ %.2f\n",
-                    sel.homeTeam(), sel.awayTeam(),
-                    sel.league(), sel.outcome(), sel.odds()
-            ));
-        }
         System.out.println();
-        System.out.println("📝 Generated description:");
-        System.out.println(description);
+        result.selections().forEach(sel ->
+                System.out.printf("   🎯 %s vs %s | %s → %s @ %.2f | %s | %s%n",
+                        sel.homeTeam(), sel.awayTeam(),
+                        sel.market(), sel.outcome(), sel.odds(),
+                        sel.kickoffTime(), sel.matchStatus())
+        );
 
-        // 3. Build and save BettingSlip
+        // ── 5. Build and save one BettingSlip ─────────────────────────────
         BettingSlip slip = BettingSlip.builder()
                 .bookmaker(result.bookmaker())
                 .bookingCode(result.bookingCode())
                 .totalOdds(result.totalOdds())
-                .description(description.toString().trim())
+                .description(description)
+                .selections(selectionsJson)          // ← JSON array of all games
+                .totalSelections(result.totalSelections()) // ← game count
+                .deadline(result.deadline())         // ← code expiry
                 .type(vipOnly ? PredictionType.VIP : PredictionType.FREE)
                 .published(published)
+                .status(SlipStatus.ACTIVE)
                 .createdAt(LocalDateTime.now(APP_ZONE))
                 .updatedAt(LocalDateTime.now(APP_ZONE))
                 .build();
 
         BettingSlip saved = bettingSlipRepo.save(slip);
 
-        System.out.printf("✅ BettingSlip saved! ID: %s%n", saved.getId());
-        log.info("🎫 Slip auto-created from code {} [{}]: id={}, odds={}, selections={}",
-                code, bookmaker, saved.getId(), result.totalOdds(), result.totalSelections());
+        log.info("✅ Slip saved! id={} code={} games={} odds={}",
+                saved.getId(), saved.getBookingCode(),
+                saved.getTotalSelections(), saved.getTotalOdds());
 
         return mapSlip(saved);
     }
@@ -705,15 +687,10 @@ public class GameService {
 
     private GameResponse mapGamePublic(Game g) {
         return GameResponse.builder()
-                .id(g.getId())
-                .homeTeam(g.getHomeTeam())
-                .awayTeam(g.getAwayTeam())
-                .league(g.getLeague())
-                .leagueLogo(g.getLeagueLogo())
-                .homeLogo(g.getHomeLogo())
-                .awayLogo(g.getAwayLogo())
-                .kickoffTime(g.getKickoffTime())
-                .status(g.getStatus())
+                .id(g.getId()).homeTeam(g.getHomeTeam()).awayTeam(g.getAwayTeam())
+                .league(g.getLeague()).leagueLogo(g.getLeagueLogo())
+                .homeLogo(g.getHomeLogo()).awayLogo(g.getAwayLogo())
+                .kickoffTime(g.getKickoffTime()).status(g.getStatus())
                 .build();
     }
 
@@ -730,26 +707,24 @@ public class GameService {
                 .published(s.isPublished())
                 .validUntil(s.getValidUntil())
                 .createdAt(s.getCreatedAt())
-                .updatedAt(s.getUpdatedAt());
+                .updatedAt(s.getUpdatedAt())
+                // ── New fields for multi-game slips ──────────────────────
+                .selections(s.getSelections())          // JSON string of all games
+                .totalSelections(s.getTotalSelections()) // e.g. 4
+                .deadline(s.getDeadline());              // code expiry
 
+        // Legacy single-game link (still supported)
         if (s.getGame() != null) {
             Game g = s.getGame();
             builder.gameId(g.getId())
-                    .homeTeam(g.getHomeTeam())
-                    .awayTeam(g.getAwayTeam())
-                    .league(g.getLeague())
-                    .homeLogo(g.getHomeLogo())
-                    .awayLogo(g.getAwayLogo())
+                    .homeTeam(g.getHomeTeam()).awayTeam(g.getAwayTeam())
+                    .league(g.getLeague()).homeLogo(g.getHomeLogo()).awayLogo(g.getAwayLogo())
                     .kickoffTime(g.getKickoffTime())
                     .gameStatus(g.getStatus() != null ? g.getStatus().name() : null)
-                    .homeScore(g.getHomeScore())
-                    .awayScore(g.getAwayScore())
-                    .homeWinOdds(g.getHomeWinOdds())
-                    .drawOdds(g.getDrawOdds())
-                    .awayWinOdds(g.getAwayWinOdds())
-                    .over15Odds(g.getOver15Odds())
-                    .over25Odds(g.getOver25Odds())
-                    .over35Odds(g.getOver35Odds())
+                    .homeScore(g.getHomeScore()).awayScore(g.getAwayScore())
+                    .homeWinOdds(g.getHomeWinOdds()).drawOdds(g.getDrawOdds())
+                    .awayWinOdds(g.getAwayWinOdds()).over15Odds(g.getOver15Odds())
+                    .over25Odds(g.getOver25Odds()).over35Odds(g.getOver35Odds())
                     .under25Odds(g.getUnder25Odds());
         }
 
@@ -758,13 +733,13 @@ public class GameService {
 
     private BettingSlipResponse mapSlipPublic(BettingSlip s) {
         return BettingSlipResponse.builder()
-                .id(s.getId())
-                .bookmaker(s.getBookmaker())
-                .bookingCode("****")
+                .id(s.getId()).bookmaker(s.getBookmaker())
+                .bookingCode("****")                    // hide code for public
                 .description(s.getDescription())
                 .totalOdds(s.getTotalOdds())
-                .type(s.getType())
-                .status(s.getStatus())
+                .type(s.getType()).status(s.getStatus())
+                .totalSelections(s.getTotalSelections())
+                .selections(s.getSelections())          // still show game details
                 .build();
     }
 }
