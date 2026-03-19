@@ -236,14 +236,14 @@ public class AdminGameController {
     }
 
     /** POST /api/v1/admin/games/book/bulk */
+    /** POST /api/v1/admin/games/book/bulk */
     @PostMapping("/book/bulk")
     public ResponseEntity<ApiResponse<List<GameResponse>>> bookMultipleGames(
             @AuthenticationPrincipal AdminPrincipal adminPrincipal,
-            @Valid @RequestBody BulkBookGamesRequest request) {
-        log.info("[ADMIN][GAMES] Bulk book → count={} requestedBy={}", request.getGameIds().size(), adminPrincipal.getSellerId());
+            @Valid @RequestBody List<BookGameRequest> requests) {
+        log.info("[ADMIN][GAMES] Bulk book → count={} requestedBy={}", requests.size(), adminPrincipal.getSellerId());
         try {
-            List<GameResponse> games = gameService.bookMultipleGames(
-                    request.getGameIds(), request.isPublished(), request.isVipOnly());
+            List<GameResponse> games = gameService.bookMultipleGames(requests);
             log.info("[ADMIN][GAMES] Bulk done → booked={} requestedBy={}", games.size(), adminPrincipal.getSellerId());
             messagingTemplate.convertAndSend("/topic/games-update",
                     (Object) Map.of("event", "BULK_BOOKED", "count", games.size()));

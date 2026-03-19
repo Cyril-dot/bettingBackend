@@ -146,15 +146,12 @@ public class GameService {
         return mapGame(saved);
     }
 
-    public List<GameResponse> bookMultipleGames(List<UUID> gameIds, boolean published, boolean vipOnly) {
-        return gameIds.stream().map(id -> {
-            BookGameRequest req = new BookGameRequest();
-            req.setGameId(id);
-            req.setPublished(published);
-            req.setVipOnly(vipOnly);
-            return bookGame(req);
-        }).collect(Collectors.toList());
+    public List<GameResponse> bookMultipleGames(List<BookGameRequest> requests) {
+        return requests.stream()
+                .map(this::bookGame)
+                .collect(Collectors.toList());
     }
+
 
     public GameResponse unpublishGame(UUID gameId) {
         Game game = gameRepo.findById(gameId)
