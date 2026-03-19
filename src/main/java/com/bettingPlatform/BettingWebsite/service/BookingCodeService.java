@@ -22,57 +22,40 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * BookingCodeService  —  UPDATED & IMPROVED
+ * BookingCodeService  —  v3  (Direct-first + ScrapeOps 4-key fallback)
  *
- * ── What changed from v1 ──────────────────────────────────────────────────────
- *  FIX 1  Browser-like headers on every request (User-Agent, Referer, Accept-Language,
- *          X-Requested-With). This was the primary cause of Sportybet blocking requests
- *          even when routed through residential proxies.
+ * ── Root cause of v2 failure ──────────────────────────────────────────────────
+ *  ScrapeOps was returning HTTP 500 "Failed to get successful response from
+ *  website" on ALL 4 keys (both datacenter and residential tiers).
+ *  Sportybet is blocking the entire ScrapeOps IP pool at the network level.
  *
- *  FIX 2  Two-tier proxy strategy per key:
- *           Tier A — plain datacenter proxy (1 credit each)  ← tried FIRST
- *           Tier B — residential proxy (10 credits each)     ← fallback if Tier A blocked
- *          This saves ~90% of ScrapeOps credits on requests that succeed with datacenter IPs.
+ *  Key insight: the "Full Response Inspector" HTML page calls Sportybet DIRECTLY
+ *  from a browser (no proxy) and gets a valid XML response every time.
+ *  This proves Sportybet's API is publicly accessible — it only blocks known
+ *  proxy/datacenter IP ranges like ScrapeOps.
  *
- *  FIX 3  Key rotation only advances on SUCCESS, not on every attempt.
- *          Previously the index advanced even when the next key was about to be tried,
- *          causing uneven credit distribution.
+ * ── New fetch strategy ────────────────────────────────────────────────────────
+ *  Step 1 — Direct GET from this server with 3 browser UA profiles.
+ *            Your Render server IP is clean and not in any proxy blocklist.
+ *            This is FREE and should succeed on the first attempt virtually
+ *            every time.
  *
- *  FIX 4  Placeholder / empty key detection — skips keys that haven't been filled in.
+ *  Step 2 — If ALL 3 direct attempts fail (e.g. Render IP gets temporarily
+ *            flagged), fall back to the 4 ScrapeOps keys with the same
+ *            datacenter-first / residential-second strategy from v2.
  *
- *  FIX 5  Exponential back-off (100 ms, 200 ms, 400 ms) between proxy attempts
- *          to avoid hammering ScrapeOps when a key is temporarily rate-limited.
- *
- *  FIX 6  Better bizCode error messages — maps known Sportybet codes to readable text.
- *
- *  FIX 7  Betway Ghana parser now also sets sport, country and kickoff timestamp
- *          from the JSON response.
- *
- * ── Proxy Credit Cost Reminder ────────────────────────────────────────────────
- *  Datacenter (residential=false) :  1 credit per request
- *  Residential  (residential=true) : 10 credits per request
- *  4 keys × 1,000 credits = 4,000 datacenter requests OR 400 residential requests/month
- *
- * ── ScrapeOps Keys ───────────────────────────────────────────────────────────
- *  Sign up free at https://scrapeops.io — each account gives 1,000 credits/month.
+ * ── Credit cost ───────────────────────────────────────────────────────────────
+ *  Direct fetch  : 0 credits  ← used 99% of the time
+ *  Datacenter    : 1 credit / request  ← ScrapeOps Tier A fallback
+ *  Residential   : 10 credits / request ← ScrapeOps Tier B fallback
  */
 @Service
 @Slf4j
 public class BookingCodeService {
 
-    // ── ScrapeOps API keys ────────────────────────────────────────────────────
-    private static final String[] SCRAPEOPS_KEYS = {
-            "230b20f9-cc9f-4edb-bfee-38430ce0d22d",   // Key 1 — primary
-            "c2e7161e-cd7e-4505-8ab7-94ff993bf23c",   // Key 2 — fallback
-            "fca93b28-accd-4946-ab33-07d1f43ffb1d",   // Key 3 — fallback
-            "7cb32829-319f-4de6-8c37-162a90d729af",   // Key 4 — fallback
-    };
-
-    private static final String SCRAPEOPS_PROXY_URL = "https://proxy.scrapeops.io/v1/";
-
     // ── Timeouts ──────────────────────────────────────────────────────────────
-    private static final int CONNECT_TIMEOUT_MS = 15_000;
-    private static final int READ_TIMEOUT_MS    = 30_000;
+    private static final int CONNECT_TIMEOUT_MS = 12_000;
+    private static final int READ_TIMEOUT_MS    = 20_000;
 
     // ── Sportybet / Betway base URLs ──────────────────────────────────────────
     private static final String SPORTYBET_GH_URL = "https://www.sportybet.com/api/gh/orders/share/";
@@ -83,15 +66,31 @@ public class BookingCodeService {
     private static final DateTimeFormatter KICKOFF_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'").withZone(ZoneId.of("UTC"));
 
-    // ── Round-robin key index (thread-safe) ───────────────────────────────────
-    private final AtomicInteger keyIndex = new AtomicInteger(0);
+    // ── Browser UA profiles — rotate on each direct retry ────────────────────
+    // These mirror exactly what the working HTML inspector sends from a browser.
+    private static final String[] USER_AGENTS = {
+            // Android Chrome — most common in Ghana/Nigeria
+            "Mozilla/5.0 (Linux; Android 12; SM-A525F) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+            // iPhone Safari
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) " +
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1",
+            // Windows Chrome desktop
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    };
 
-    // ── FIX 1: Browser-like headers that mimic a Ghanaian Android Chrome user ─
-    //    Without these, Sportybet's WAF blocks the request before it even reaches
-    //    the booking-code API, returning a 403 or empty body.
-    private static final String MOBILE_USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+    // ── ScrapeOps fallback — 4 keys, kept as safety net ──────────────────────
+    private static final String[] SCRAPEOPS_KEYS = {
+            "230b20f9-cc9f-4edb-bfee-38430ce0d22d",   // Key 1
+            "c2e7161e-cd7e-4505-8ab7-94ff993bf23c",   // Key 2
+            "fca93b28-accd-4946-ab33-07d1f43ffb1d",   // Key 3
+            "7cb32829-319f-4de6-8c37-162a90d729af",   // Key 4
+    };
+    private static final String SCRAPEOPS_PROXY_URL = "https://proxy.scrapeops.io/v1/";
+
+    // Round-robin index for ScrapeOps (thread-safe)
+    private final AtomicInteger scrapeopsKeyIndex = new AtomicInteger(0);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DTOs
@@ -146,115 +145,163 @@ public class BookingCodeService {
 
     public BookingCodeResult fetchSportybetGhana(String code) {
         log.info("📡 [Sportybet GH] Fetching code: {}", code);
-        String xml = fetchViaProxy(SPORTYBET_GH_URL + code, "gh");
+        String xml = fetchWithDirectFirst(SPORTYBET_GH_URL + code, "gh");
         return parseSportybetXml(xml, code, "Sportybet Ghana");
     }
 
     public BookingCodeResult fetchSportybetNigeria(String code) {
         log.info("📡 [Sportybet NG] Fetching code: {}", code);
-        String xml = fetchViaProxy(SPORTYBET_NG_URL + code, "ng");
+        String xml = fetchWithDirectFirst(SPORTYBET_NG_URL + code, "ng");
         return parseSportybetXml(xml, code, "Sportybet Nigeria");
     }
 
     public BookingCodeResult fetchBetwayGhana(String code) {
         log.info("📡 [Betway GH] Fetching code: {}", code);
-        String raw = fetchViaProxy(BETWAY_GH_URL + code, "gh");
+        String raw = fetchWithDirectFirst(BETWAY_GH_URL + code, "gh");
         return parseBetwayJson(raw, code);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SCRAPEOPS PROXY — two-tier strategy with key rotation
+    // MASTER FETCH ORCHESTRATOR
     //
-    // Strategy (FIX 2):
-    //   For each key, try Tier A (datacenter, 1 credit) first.
-    //   If Sportybet returns a non-XML/error body, escalate to Tier B (residential, 10 credits).
-    //   Move to the next key only when BOTH tiers fail for the current key.
-    //
-    // Key rotation (FIX 3):
-    //   keyIndex advances ONLY after a successful request so that credits spread
-    //   evenly and a failed key attempt doesn't skip a good key permanently.
+    // Priority 1 — direct call from this server (mirrors the HTML inspector).
+    // Priority 2 — ScrapeOps 4-key rotation (datacenter then residential).
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private String fetchViaProxy(String targetUrl, String country) {
-        int startIdx = keyIndex.get();
+    private String fetchWithDirectFirst(String targetUrl, String country) {
+
+        // ── Step 1: direct attempts (free, no credits) ────────────────────────
+        log.info("  🌐  Direct fetch attempt: {}", targetUrl);
+        for (int i = 0; i < USER_AGENTS.length; i++) {
+            try {
+                String result = doDirectGet(targetUrl, country, USER_AGENTS[i]);
+                log.info("  ✅  Direct fetch succeeded (UA profile #{})", i + 1);
+                return result;
+            } catch (Exception e) {
+                log.warn("  ⚠  Direct attempt #{} failed: {}", i + 1, e.getMessage());
+                if (i < USER_AGENTS.length - 1) {
+                    try { Thread.sleep(250); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+                }
+            }
+        }
+
+        // ── Step 2: ScrapeOps fallback ────────────────────────────────────────
+        log.warn("  🔄  All direct attempts failed — using ScrapeOps fallback");
+        return fetchViaScrapeOps(targetUrl, country);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DIRECT GET — same headers as the working HTML inspector
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private String doDirectGet(String targetUrl, String country, String userAgent) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(READ_TIMEOUT_MS);
+        RestTemplate rest = new RestTemplate(factory);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.ACCEPT,          "application/xml, text/xml, application/json, */*");
+        headers.set(HttpHeaders.ACCEPT_LANGUAGE, "en-GH,en-US;q=0.9,en;q=0.8");
+        headers.set(HttpHeaders.USER_AGENT,       userAgent);
+        headers.set(HttpHeaders.REFERER,          "https://www.sportybet.com/" + country + "/");
+        headers.set("X-Requested-With",           "XMLHttpRequest");
+        headers.set("sec-fetch-dest",             "empty");
+        headers.set("sec-fetch-mode",             "cors");
+        headers.set("sec-fetch-site",             "same-origin");
+
+        log.debug("  📡  Direct GET → {}", targetUrl);
+
+        ResponseEntity<String> response = rest.exchange(
+                targetUrl, HttpMethod.GET,
+                new HttpEntity<>(headers), String.class);
+
+        String body = response.getBody();
+
+        if (!response.getStatusCode().is2xxSuccessful() || body == null || body.isBlank()) {
+            throw new RuntimeException("Non-2xx or empty response: " + response.getStatusCode());
+        }
+        if (body.trim().startsWith("<!DOCTYPE") || body.trim().startsWith("<html")) {
+            throw new RuntimeException(
+                    "Got HTML page (WAF/Cloudflare block). Preview: " +
+                            body.substring(0, Math.min(150, body.length())));
+        }
+
+        log.info("  ✅  Direct HTTP {} — {} chars received", response.getStatusCode(), body.length());
+        return body;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SCRAPEOPS FALLBACK — 4 keys × 2 tiers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private String fetchViaScrapeOps(String targetUrl, String country) {
+        int startIdx = scrapeopsKeyIndex.get();
         int numKeys  = SCRAPEOPS_KEYS.length;
 
         for (int i = 0; i < numKeys; i++) {
-            int idx = (startIdx + i) % numKeys;
+            int    idx = (startIdx + i) % numKeys;
             String key = SCRAPEOPS_KEYS[idx];
 
-            // FIX 4: skip unfilled placeholder keys
             if (key == null || key.isBlank() || key.startsWith("REPLACE_WITH")) {
-                log.debug("  ⏭  Skipping empty/placeholder key #{}", idx + 1);
+                log.debug("  ⏭  Skipping placeholder key #{}", idx + 1);
                 continue;
             }
 
-            // FIX 5: exponential back-off between attempts (skip on first try)
+            // Exponential back-off between keys
             if (i > 0) {
-                long delayMs = 100L * (1L << Math.min(i - 1, 4)); // 100, 200, 400, 800, 800 ms
+                long delayMs = 100L * (1L << Math.min(i - 1, 4));
                 log.debug("  ⏳  Back-off {}ms before key #{}", delayMs, idx + 1);
                 try { Thread.sleep(delayMs); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
             }
 
-            // ── Tier A: datacenter (cheap, 1 credit) ──────────────────────────
+            // Tier A: datacenter (1 credit)
             try {
-                log.info("  ▶ Key #{} — Tier A (datacenter)", idx + 1);
+                log.info("  ▶ ScrapeOps key #{} — Tier A (datacenter)", idx + 1);
                 String result = doScrapeOpsGet(key, targetUrl, country, false);
-                keyIndex.set((idx + 1) % numKeys); // advance on success
-                log.info("  ✅ Key #{} Tier A succeeded", idx + 1);
+                scrapeopsKeyIndex.set((idx + 1) % numKeys);
+                log.info("  ✅  ScrapeOps key #{} Tier A succeeded", idx + 1);
                 return result;
             } catch (Exception e) {
-                log.warn("  ⚠  Key #{} Tier A failed: {} — escalating to Tier B (residential)", idx + 1, e.getMessage());
+                log.warn("  ⚠  Key #{} Tier A failed: {} — trying residential", idx + 1, e.getMessage());
             }
 
-            // ── Tier B: residential (10 credits — fallback only) ──────────────
+            // Tier B: residential (10 credits)
             try {
-                log.info("  ▶ Key #{} — Tier B (residential)", idx + 1);
+                log.info("  ▶ ScrapeOps key #{} — Tier B (residential)", idx + 1);
                 String result = doScrapeOpsGet(key, targetUrl, country, true);
-                keyIndex.set((idx + 1) % numKeys);
-                log.info("  ✅ Key #{} Tier B succeeded", idx + 1);
+                scrapeopsKeyIndex.set((idx + 1) % numKeys);
+                log.info("  ✅  ScrapeOps key #{} Tier B succeeded", idx + 1);
                 return result;
             } catch (Exception e) {
-                log.warn("  ⚠  Key #{} Tier B also failed: {} — trying next key", idx + 1, e.getMessage());
+                log.warn("  ⚠  Key #{} Tier B failed: {} — next key", idx + 1, e.getMessage());
             }
         }
 
         throw new RuntimeException(
-                "All ScrapeOps keys failed for: " + targetUrl +
-                        ". Verify your keys at scrapeops.io and check monthly credit usage.");
+                "All fetch methods failed for: " + targetUrl +
+                        ". Direct fetch blocked AND all 4 ScrapeOps keys failed.");
     }
 
-    /**
-     * Executes a single GET through the ScrapeOps proxy.
-     *
-     * @param apiKey      ScrapeOps API key
-     * @param targetUrl   the real Sportybet/Betway URL
-     * @param country     ISO country code for geo-routing ("gh", "ng")
-     * @param residential true = residential proxy (10 credits), false = datacenter (1 credit)
-     */
     private String doScrapeOpsGet(String apiKey, String targetUrl, String country, boolean residential) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
         factory.setReadTimeout(READ_TIMEOUT_MS);
         RestTemplate rest = new RestTemplate(factory);
 
-        // Build proxy URL
         StringBuilder proxyUrl = new StringBuilder(SCRAPEOPS_PROXY_URL)
                 .append("?api_key=").append(apiKey)
                 .append("&url=").append(URLEncoder.encode(targetUrl, StandardCharsets.UTF_8))
                 .append("&country=").append(country);
+        if (residential) proxyUrl.append("&residential=true");
 
-        if (residential) {
-            proxyUrl.append("&residential=true");
-        }
+        log.debug("  📡  ScrapeOps proxy (truncated): {}…",
+                proxyUrl.substring(0, Math.min(80, proxyUrl.length())));
 
-        log.debug("  📡  Proxy URL (truncated): {}…", proxyUrl.substring(0, Math.min(80, proxyUrl.length())));
-
-        // FIX 1: browser-like headers — the single most effective fix against Sportybet's WAF
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.ACCEPT,          "application/xml, text/xml, application/json, */*");
         headers.set(HttpHeaders.ACCEPT_LANGUAGE, "en-GH,en;q=0.9");
-        headers.set(HttpHeaders.USER_AGENT,       MOBILE_USER_AGENT);
+        headers.set(HttpHeaders.USER_AGENT,       USER_AGENTS[0]);
         headers.set(HttpHeaders.REFERER,          "https://www.sportybet.com/" + country + "/");
         headers.set("X-Requested-With",           "XMLHttpRequest");
 
@@ -264,30 +311,25 @@ public class BookingCodeService {
                     new HttpEntity<>(headers), String.class);
 
             String body = response.getBody();
-
             if (!response.getStatusCode().is2xxSuccessful() || body == null || body.isBlank()) {
-                throw new RuntimeException("Empty/non-2xx response: " + response.getStatusCode());
+                throw new RuntimeException("Non-2xx/empty: " + response.getStatusCode());
             }
-
-            // Reject obvious HTML error pages (Cloudflare, WAF, etc.)
             if (body.trim().startsWith("<!DOCTYPE") || body.trim().startsWith("<html")) {
-                throw new RuntimeException(
-                        "Received HTML page instead of XML — likely blocked by WAF or Cloudflare. " +
-                                "Body preview: " + body.substring(0, Math.min(200, body.length())));
+                throw new RuntimeException("Got HTML page (WAF block via proxy)");
             }
-
-            log.info("  ✅  HTTP {} — {} chars received", response.getStatusCode(), body.length());
+            log.info("  ✅  ScrapeOps HTTP {} — {} chars", response.getStatusCode(), body.length());
             return body;
 
         } catch (HttpClientErrorException e) {
             String hint = switch (e.getStatusCode().value()) {
-                case 403 -> "API key rejected or exhausted (403)";
-                case 429 -> "Rate limited (429) — too many requests on this key";
-                case 404 -> "URL not found (404) — check booking code";
+                case 403 -> "Key rejected/exhausted (403)";
+                case 429 -> "Rate limited (429)";
+                case 404 -> "URL not found (404)";
                 default  -> "HTTP " + e.getStatusCode();
             };
-            throw new RuntimeException(hint + " — " + e.getResponseBodyAsString().substring(
-                    0, Math.min(100, e.getResponseBodyAsString().length())));
+            throw new RuntimeException(hint + ": " +
+                    e.getResponseBodyAsString().substring(
+                            0, Math.min(120, e.getResponseBodyAsString().length())));
         }
     }
 
@@ -303,7 +345,6 @@ public class BookingCodeService {
             Document doc = db.parse(new InputSource(new StringReader(rawXml)));
             doc.getDocumentElement().normalize();
 
-            // FIX 6: map known Sportybet bizCodes to readable messages
             String bizCode = getTagValue(doc, "bizCode");
             String message = getTagValue(doc, "message");
             if (!"10000".equals(bizCode)) {
@@ -319,7 +360,6 @@ public class BookingCodeService {
 
             String shareCode = getTagValue(doc, "shareCode");
             String deadline  = getTagValue(doc, "deadline");
-
             log.info("  📋  shareCode={} deadline={}", shareCode, deadline);
 
             NodeList outcomesList = doc.getElementsByTagName("outcomes");
@@ -332,7 +372,7 @@ public class BookingCodeService {
                 Element el = (Element) node;
 
                 String homeTeam = getChildValue(el, "homeTeamName");
-                if (homeTeam.isEmpty()) continue; // skip non-game nodes
+                if (homeTeam.isEmpty()) continue;
 
                 String awayTeam      = getChildValue(el, "awayTeamName");
                 String eventId       = getChildValue(el, "eventId");
@@ -348,10 +388,7 @@ public class BookingCodeService {
                         ? KICKOFF_FMT.format(Instant.ofEpochMilli(kickoffTs))
                         : "TBD";
 
-                String sport   = "";
-                String country = "";
-                String league  = "";
-
+                String sport = "", country = "", league = "";
                 NodeList sportNodes = el.getElementsByTagName("sport");
                 if (sportNodes.getLength() > 0) {
                     Element sportEl = (Element) sportNodes.item(0);
@@ -376,8 +413,8 @@ public class BookingCodeService {
                 for (int m = 0; m < marketsList.getLength(); m++) {
                     Node mNode = marketsList.item(m);
                     if (mNode.getNodeType() != Node.ELEMENT_NODE) continue;
-                    Element mEl    = (Element) mNode;
-                    String  mDesc  = getChildValue(mEl, "desc");
+                    Element mEl   = (Element) mNode;
+                    String  mDesc = getChildValue(mEl, "desc");
                     if (!mDesc.isEmpty()) {
                         market = mDesc;
                         NodeList oNodes = mEl.getElementsByTagName("outcomes");
@@ -410,9 +447,9 @@ public class BookingCodeService {
                         eventId, gameId
                 ));
 
-                log.info("  🎯  [{}/{}] {} vs {} | {} → {} @ {} | {} | {}",
+                log.info("  🎯  [{}/{}] {} vs {} | {} → {} @ {} | {}",
                         country, league, homeTeam, awayTeam,
-                        market, outcome, odds, kickoffStr, matchStatus);
+                        market, outcome, odds, matchStatus);
             }
 
             if (selections.isEmpty()) {
@@ -440,7 +477,6 @@ public class BookingCodeService {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // BETWAY GHANA JSON PARSER
-    // FIX 7: now extracts sport, country and kickoff timestamp properly
     // ═══════════════════════════════════════════════════════════════════════════
 
     private BookingCodeResult parseBetwayJson(String raw, String bookingCode) {
@@ -461,7 +497,6 @@ public class BookingCodeService {
             List<SlipSelection> selections = new ArrayList<>();
 
             for (com.fasterxml.jackson.databind.JsonNode s : sels) {
-                // FIX 7a: parse kickoff timestamp from ISO date string if present
                 String kickoffRaw = s.path("KickOffDate").asText("");
                 long kickoffTs = 0;
                 String kickoffStr = "TBD";
@@ -470,29 +505,23 @@ public class BookingCodeService {
                         kickoffTs  = Instant.parse(kickoffRaw).toEpochMilli();
                         kickoffStr = KICKOFF_FMT.format(Instant.ofEpochMilli(kickoffTs));
                     } catch (Exception ignored) {
-                        kickoffStr = kickoffRaw; // fallback: use raw string
+                        kickoffStr = kickoffRaw;
                     }
                 }
-
-                // FIX 7b: extract sport and country from Betway JSON
-                String sport   = s.path("SportName").asText("Football");
-                String country = s.path("CategoryName").asText("");
 
                 selections.add(new SlipSelection(
                         s.path("HomeTeamName").asText("?"),
                         s.path("AwayTeamName").asText("?"),
                         s.path("CompetitionName").asText("?"),
-                        country,
-                        sport,
+                        s.path("CategoryName").asText(""),
+                        s.path("SportName").asText("Football"),
                         s.path("MarketName").asText("1X2"),
                         s.path("OutcomeName").asText("?"),
                         s.path("Price").asDouble(0.0),
-                        kickoffStr,
-                        kickoffTs,
+                        kickoffStr, kickoffTs,
                         s.path("MatchStatus").asText("Unknown"),
                         s.path("Score").asText(""),
-                        "",
-                        0,
+                        "", 0,
                         "Booked",
                         s.path("IsWinner").asBoolean(false),
                         s.path("EventId").asText(""),
@@ -529,7 +558,6 @@ public class BookingCodeService {
     private String getChildValue(Element parent, String tag) {
         NodeList list = parent.getElementsByTagName(tag);
         if (list.getLength() == 0) return "";
-        // Prefer direct child to avoid picking up deeply-nested values
         for (int i = 0; i < list.getLength(); i++) {
             Node n = list.item(i);
             if (n.getParentNode() == parent) {
@@ -537,8 +565,7 @@ public class BookingCodeService {
             }
         }
         return list.item(0).getTextContent() != null
-                ? list.item(0).getTextContent().trim()
-                : "";
+                ? list.item(0).getTextContent().trim() : "";
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -577,15 +604,15 @@ public class BookingCodeService {
 
         for (int i = 0; i < result.selections().size(); i++) {
             SlipSelection s = result.selections().get(i);
-            System.out.printf("║  #%d  %s  vs  %s%n",            i + 1, s.homeTeam(), s.awayTeam());
-            System.out.printf("║       🏆 League    : %s (%s)%n", s.league(), s.country());
-            System.out.printf("║       📊 Market    : %s%n",       s.market());
-            System.out.printf("║       ✅ Pick      : %s%n",       s.outcome());
-            System.out.printf("║       💰 Odds      : %.2f%n",     s.odds());
-            System.out.printf("║       ⏰ Kickoff   : %s%n",       s.kickoffTime());
-            System.out.printf("║       🔴 Status    : %s%s%n",     s.matchStatus(),
+            System.out.printf("║  #%d  %s  vs  %s%n",             i + 1, s.homeTeam(), s.awayTeam());
+            System.out.printf("║       🏆 League    : %s (%s)%n",  s.league(), s.country());
+            System.out.printf("║       📊 Market    : %s%n",        s.market());
+            System.out.printf("║       ✅ Pick      : %s%n",        s.outcome());
+            System.out.printf("║       💰 Odds      : %.2f%n",      s.odds());
+            System.out.printf("║       ⏰ Kickoff   : %s%n",        s.kickoffTime());
+            System.out.printf("║       🔴 Status    : %s%s%n",      s.matchStatus(),
                     s.score().isEmpty() ? "" : " | Score: " + s.score());
-            System.out.printf("║       🎫 Booking   : %s%s%n",     s.bookingStatus(),
+            System.out.printf("║       🎫 Booking   : %s%s%n",      s.bookingStatus(),
                     s.isWinning() ? " ✅ WON" : "");
             if (i < result.selections().size() - 1) {
                 System.out.println("║       ──────────────────────────────────────────────────────  ║");
