@@ -18,7 +18,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -165,8 +167,6 @@ public class BookingCodeService {
         headers.set("sec-fetch-mode",             "cors");
         headers.set("sec-fetch-site",             "same-origin");
 
-        log.debug("  📡  Direct GET → {}", targetUrl);
-
         ResponseEntity<String> response = rest.exchange(
                 targetUrl, HttpMethod.GET,
                 new HttpEntity<>(headers), String.class);
@@ -205,7 +205,6 @@ public class BookingCodeService {
 
             if (i > 0) {
                 long delayMs = 100L * (1L << Math.min(i - 1, 4));
-                log.debug("  ⏳  Back-off {}ms before key #{}", delayMs, idx + 1);
                 try { Thread.sleep(delayMs); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
             }
 
@@ -213,7 +212,6 @@ public class BookingCodeService {
                 log.info("  ▶ ScrapeOps key #{} — Tier A (datacenter)", idx + 1);
                 String result = doScrapeOpsGet(key, targetUrl, country, false);
                 scrapeopsKeyIndex.set((idx + 1) % numKeys);
-                log.info("  ✅  ScrapeOps key #{} Tier A succeeded", idx + 1);
                 return result;
             } catch (Exception e) {
                 log.warn("  ⚠  Key #{} Tier A failed: {} — trying residential", idx + 1, e.getMessage());
@@ -223,7 +221,6 @@ public class BookingCodeService {
                 log.info("  ▶ ScrapeOps key #{} — Tier B (residential)", idx + 1);
                 String result = doScrapeOpsGet(key, targetUrl, country, true);
                 scrapeopsKeyIndex.set((idx + 1) % numKeys);
-                log.info("  ✅  ScrapeOps key #{} Tier B succeeded", idx + 1);
                 return result;
             } catch (Exception e) {
                 log.warn("  ⚠  Key #{} Tier B failed: {} — next key", idx + 1, e.getMessage());
@@ -246,9 +243,6 @@ public class BookingCodeService {
                 .append("&url=").append(URLEncoder.encode(targetUrl, StandardCharsets.UTF_8))
                 .append("&country=").append(country);
         if (residential) proxyUrl.append("&residential=true");
-
-        log.debug("  📡  ScrapeOps proxy (truncated): {}…",
-                proxyUrl.substring(0, Math.min(80, proxyUrl.length())));
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.ACCEPT,          "application/xml, text/xml, application/json, */*");
@@ -286,7 +280,7 @@ public class BookingCodeService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SPORTYBET XML PARSER  —  BUG FIX: skip nested <outcomes> inside <markets>
+    // SPORTYBET XML PARSER
     // ═══════════════════════════════════════════════════════════════════════════
 
     private BookingCodeResult parseSportybetXml(String rawXml, String bookingCode, String bookmakerName) {
@@ -318,18 +312,30 @@ public class BookingCodeService {
             List<SlipSelection> selections = new ArrayList<>();
             double totalOdds = 1.0;
 
+            // ── Deduplication set: track eventIds we've already added ──────────
+            Set<String> seenEventIds = new HashSet<>();
+
             for (int i = 0; i < outcomesList.getLength(); i++) {
                 Node node = outcomesList.item(i);
                 if (node.getNodeType() != Node.ELEMENT_NODE) continue;
                 Element el = (Element) node;
 
-                // ── FIX: skip nested <outcomes> that live inside a <markets> element ──
-                // getElementsByTagName("outcomes") returns ALL outcomes in the doc,
-                // including the per-market outcome rows. Those have parent = <markets>.
-                // We only want the top-level game-selection <outcomes> nodes.
-                Node parentNode = el.getParentNode();
-                if (parentNode != null && "markets".equals(parentNode.getNodeName())) continue;
-                // ────────────────────────────────────────────────────────────────────
+                // ── GUARD 1: skip any <outcomes> whose parent tag is NOT a list/data
+                // wrapper — i.e. skip nested market outcome nodes.
+                // We do this by requiring a direct <homeTeamName> child element.
+                // Market outcome nodes only contain <desc>, <odds>, <isWinning> etc.
+                // — they NEVER have <homeTeamName> as a direct child.
+                boolean hasDirectHomeTeam = false;
+                NodeList children = el.getChildNodes();
+                for (int c = 0; c < children.getLength(); c++) {
+                    Node child = children.item(c);
+                    if (child.getNodeType() == Node.ELEMENT_NODE
+                            && "homeTeamName".equals(child.getNodeName())) {
+                        hasDirectHomeTeam = true;
+                        break;
+                    }
+                }
+                if (!hasDirectHomeTeam) continue;
 
                 String homeTeam = getChildValue(el, "homeTeamName");
                 if (homeTeam.isEmpty()) continue;
@@ -342,6 +348,19 @@ public class BookingCodeService {
                 String playedTime    = getChildValue(el, "playedSeconds");
                 String bookingStatus = getChildValue(el, "bookingStatus");
                 int    statusCode    = parseInt(getChildValue(el, "status"));
+
+                // ── GUARD 2: skip duplicate eventIds ──────────────────────────────
+                // If two <outcomes> nodes somehow both pass Guard 1 and share the
+                // same eventId, only the first one is kept.
+                String dedupeKey = eventId.isEmpty()
+                        ? (homeTeam + "|" + awayTeam)   // fallback if no eventId
+                        : eventId;
+                if (!seenEventIds.add(dedupeKey)) {
+                    log.warn("  ⚠  Duplicate selection skipped: eventId={} ({} vs {})",
+                            eventId, homeTeam, awayTeam);
+                    continue;
+                }
+                // ─────────────────────────────────────────────────────────────────
 
                 long   kickoffTs  = parseLong(getChildValue(el, "estimateStartTime"));
                 String kickoffStr = kickoffTs > 0
