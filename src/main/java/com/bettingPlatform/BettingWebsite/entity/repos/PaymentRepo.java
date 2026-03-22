@@ -13,4 +13,8 @@ public interface PaymentRepo extends JpaRepository<Payment, UUID> {
     List<Payment> findByUser(User user);
     List<Payment> findByUserAndStatus(User user, PaymentStatus status);
     boolean existsByReferenceAndStatus(String reference, PaymentStatus status);
+
+
+    // ── NEW: needed by AdminPaymentService ────────────────────────────
+    List<Payment> findByStatus(PaymentStatus status);
 }
