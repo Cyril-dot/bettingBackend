@@ -175,8 +175,20 @@ public class PaystackService {
                     .build();
         }
 
-        Payment payment = paymentRepo.findByReference(reference)
-                .orElseThrow(() -> new RuntimeException("Payment record not found: " + reference));
+        // FIX: Return a "pending" response instead of throwing when the payment
+        // record is not found yet. This happens on Render cold starts where the
+        // redirect fires before the DB write from initiatePayment() completes.
+        // The frontend will retry automatically on a "pending" status.
+        Payment payment = paymentRepo.findByReference(reference).orElse(null);
+        if (payment == null) {
+            log.warn("⚠️ Payment record not found yet for ref: {} — may still be processing", reference);
+            return PaymentVerificationResponse.builder()
+                    .reference(reference)
+                    .status("pending")
+                    .message("Payment is still processing. Please wait a moment and try again.")
+                    .vipActivated(false)
+                    .build();
+        }
 
         HttpEntity<Void> entity = new HttpEntity<>(buildHeaders());
 
@@ -246,22 +258,8 @@ public class PaystackService {
 
     // ════════════════════════════════════════════════════════════════
     // STEP 3 — Paystack Webhook (charge.success)
-    //
-    // FIX: The old isValidSignature() re-serialised the Map payload with
-    // Jackson, which does NOT guarantee key ordering. Paystack signs the
-    // raw request body string, so a re-serialised map produces a different
-    // HMAC and the check always fails, silently dropping webhooks.
-    //
-    // The controller must now read the raw body as a String, pass it here
-    // for signature validation, AND separately parse it into the Map.
-    // See PaystackWebhookController for the updated controller code.
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * @param payload      parsed webhook body (used for event routing only)
-     * @param rawBody      the exact bytes Paystack sent — used for HMAC validation
-     * @param signature    value of the X-Paystack-Signature header
-     */
     public void handleWebhook(Map<String, Object> payload, String rawBody, String signature) {
         if (!isValidSignature(rawBody, signature)) {
             log.warn("⚠️ Invalid Paystack webhook signature — rejecting");
@@ -335,11 +333,6 @@ public class PaystackService {
         return result;
     }
 
-    /**
-     * FIX: Uses findActiveAndNotExpired() so VIP status is always evaluated
-     * against the subscription's own expiresAt, never the VipPrice table.
-     * Admin changing the price has zero effect on current subscribers.
-     */
     public Map<String, Object> getVipStatus(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -406,14 +399,6 @@ public class PaystackService {
         return headers;
     }
 
-    /**
-     * FIX: Validates against rawBody — the exact string Paystack signed.
-     *
-     * The old version called ObjectMapper.writeValueAsString(payload) on the
-     * already-parsed Map, which reorders keys and produces a different HMAC
-     * than what Paystack computed over the original payload bytes.
-     * Passing the raw body string from the controller fixes this permanently.
-     */
     private boolean isValidSignature(String rawBody, String signature) {
         try {
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA512");
