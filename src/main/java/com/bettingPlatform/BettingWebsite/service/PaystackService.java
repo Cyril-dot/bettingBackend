@@ -379,8 +379,11 @@ public class PaystackService {
         LocalDateTime now       = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusHours(24);
 
+        // FIX: always look up the existing row by user (ignoring active/expiry status)
+        // so we UPDATE it rather than INSERT a new one — the DB has a unique constraint
+        // on user_id, so inserting a second row for the same user throws a duplicate key error.
         VipSubscription subscription = vipSubscriptionRepo
-                .findActiveAndNotExpired(user, now)
+                .findByUser(user)
                 .orElse(VipSubscription.builder().user(user).build());
 
         subscription.setActivatedAt(now);

@@ -50,4 +50,6 @@ public interface VipSubscriptionRepo extends JpaRepository<VipSubscription, UUID
      * Keep this if anything in your codebase still calls it directly.
      */
     boolean existsByUserAndActiveTrue(User user);
+
+    Optional<VipSubscription> findByUser(User user);
 }

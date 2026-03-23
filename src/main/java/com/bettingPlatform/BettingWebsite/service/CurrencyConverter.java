@@ -85,16 +85,17 @@ public class CurrencyConverter {
 
         Map<String, Double> rates = fetchRates();  // USD-based rates
 
-        // Get USD→base and USD→target rates
-        double usdToBase   = rates.getOrDefault(base,   FALLBACK_RATES.getOrDefault(base,   1.0));
-        double usdToTarget = rates.getOrDefault(target, FALLBACK_RATES.getOrDefault(target, 1.0));
+        // FIX: always fall back to FALLBACK_RATES if rate is missing or zero
+        double usdToBase   = safeRate(rates, base);
+        double usdToTarget = safeRate(rates, target);
 
         // Cross-convert:  amount (base) → USD → target
-        double inUsd      = amount / usdToBase;
-        double converted  = round(inUsd * usdToTarget);
+        double inUsd     = amount / usdToBase;
+        double converted = round(inUsd * usdToTarget);
 
-        log.debug("💱 {} {} → {:.4f} USD → {} {}  (rates: 1 USD = {} {}, 1 USD = {} {})",
-                amount, base, inUsd, converted, target,
+        // FIX: use {} placeholders — {:.4f} is Python syntax and breaks SLF4J formatting
+        log.debug("💱 {} {} → {} USD → {} {}  (rates: 1 USD = {} {}, 1 USD = {} {})",
+                amount, base, String.format("%.4f", inUsd), converted, target,
                 usdToBase, base, usdToTarget, target);
 
         return converted;
@@ -114,8 +115,8 @@ public class CurrencyConverter {
         if (base.equals(target)) return 1.0;
 
         Map<String, Double> rates = fetchRates();
-        double usdToBase   = rates.getOrDefault(base,   FALLBACK_RATES.getOrDefault(base,   1.0));
-        double usdToTarget = rates.getOrDefault(target, FALLBACK_RATES.getOrDefault(target, 1.0));
+        double usdToBase   = safeRate(rates, base);
+        double usdToTarget = safeRate(rates, target);
         return round(usdToTarget / usdToBase);
     }
 
@@ -125,7 +126,7 @@ public class CurrencyConverter {
 
     @SuppressWarnings("unchecked")
     private Map<String, Double> fetchRates() {
-        long now    = System.currentTimeMillis();
+        long now   = System.currentTimeMillis();
         Map<String, Double> cached = cachedRates.get();
 
         // Return cache if still fresh
@@ -144,17 +145,38 @@ public class CurrencyConverter {
                 return FALLBACK_RATES;
             }
 
-            Map<String, Object> raw = (Map<String, Object>) body.get("rates");
+            Object rawRates = body.get("rates");
+            if (!(rawRates instanceof Map)) {
+                log.warn("⚠️ Exchange rate API response missing 'rates' map — using fallback");
+                return FALLBACK_RATES;
+            }
+
+            Map<String, Object> raw = (Map<String, Object>) rawRates;
             Map<String, Double> rates = new HashMap<>();
-            raw.forEach((k, v) -> rates.put(k, ((Number) v).doubleValue()));
+
+            // FIX: safely convert any Number subtype (Integer, Double, Float, Long, BigDecimal)
+            // to Double. The API sometimes returns Integer for whole-number rates (e.g. 1),
+            // which previously caused incorrect 1.0 defaults when currencies weren't found.
+            for (Map.Entry<String, Object> entry : raw.entrySet()) {
+                Object val = entry.getValue();
+                if (val instanceof Number) {
+                    rates.put(entry.getKey(), ((Number) val).doubleValue());
+                }
+            }
+
+            // Sanity check — make sure the currencies we care about are present
+            for (String currency : new String[]{"GHS", "NGN", "USD", "EUR", "GBP"}) {
+                if (!rates.containsKey(currency)) {
+                    log.warn("⚠️ Live rates missing {} — will fall back to hardcoded rate for that currency", currency);
+                }
+            }
 
             // Update cache
             cachedRates.set(rates);
             cacheTimestamp.set(now);
 
-            log.info("💱 Live exchange rates fetched successfully " +
-                    "(GHS={}, NGN={}, USD=1.0)",
-                    rates.get("GHS"), rates.get("NGN"));
+            log.info("💱 Live exchange rates fetched — GHS={}, NGN={}, EUR={}, GBP={}",
+                    rates.get("GHS"), rates.get("NGN"), rates.get("EUR"), rates.get("GBP"));
 
             return rates;
 
@@ -165,8 +187,25 @@ public class CurrencyConverter {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Helper
+    // Helpers
     // ─────────────────────────────────────────────────────────────
+
+    /**
+     * FIX: Returns the live rate for a currency, falling back to the hardcoded
+     * rate if missing from the live map, and finally to 1.0 as last resort.
+     * This prevents a missing or zero rate from silently breaking conversions.
+     */
+    private double safeRate(Map<String, Double> rates, String currency) {
+        Double live = rates.get(currency);
+        if (live != null && live > 0) return live;
+        Double fallback = FALLBACK_RATES.get(currency);
+        if (fallback != null && fallback > 0) {
+            log.warn("⚠️ Live rate missing for {} — using fallback rate {}", currency, fallback);
+            return fallback;
+        }
+        log.warn("⚠️ No rate found for {} — defaulting to 1.0 (conversion will be wrong)", currency);
+        return 1.0;
+    }
 
     private double round(double value) {
         return Math.round(value * 100.0) / 100.0;
