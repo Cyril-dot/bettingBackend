@@ -25,8 +25,8 @@ public class PaystackService {
     private final VipPriceRepo         vipPriceRepo;
     private final VipSubscriptionRepo  vipSubscriptionRepo;
     private final RestTemplate         restTemplate;
-    private final CurrencyConverter    currencyConverter;    // ← live conversion
-    private final IpCurrencyResolver   ipCurrencyResolver;  // ← IP → currency
+    private final CurrencyConverter    currencyConverter;
+    private final IpCurrencyResolver   ipCurrencyResolver;
 
     @Value("${paystack.secret.key}")
     private String paystackSecretKey;
@@ -40,18 +40,11 @@ public class PaystackService {
 
     // ════════════════════════════════════════════════════════════════
     // STEP 1 — User initiates payment
-    //
-    // Flow:
-    //   1. Detect user's currency from IP (auto) or manual override
-    //   2. Load admin's base price (any currency, e.g. USD)
-    //   3. Convert base price → user's currency using live rates
-    //   4. Initialize Paystack transaction
-    //   5. Save Payment record and return authorization URL
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * @param userPrincipal  authenticated user
-     * @param clientIp       raw IP extracted from the HTTP request (from controller)
+     * @param userPrincipal     authenticated user
+     * @param clientIp          raw IP extracted from the HTTP request (from controller)
      * @param currencyOverride  optional manual currency override from frontend (nullable)
      *                          Must be "GHS", "NGN", or "USD" — ignored if invalid
      */
@@ -59,7 +52,7 @@ public class PaystackService {
                                                    String clientIp,
                                                    String currencyOverride) {
 
-        // ── 1. Resolve user's currency (IP auto-detect + optional override) ──
+        // ── 1. Resolve user's currency ────────────────────────────────────────
         String userCurrency = ipCurrencyResolver
                 .resolveCurrencyWithOverride(clientIp, currencyOverride);
 
@@ -70,8 +63,11 @@ public class PaystackService {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // Block if already VIP
-        vipSubscriptionRepo.findByUserAndActiveTrue(user).ifPresent(sub -> {
+        // FIX: Block only if the user has an active, non-expired subscription.
+        // Previously used findByUserAndActiveTrue() which trusted the active flag
+        // alone — that flag is only reset by the scheduler, so a subscription
+        // whose expiresAt had passed could still block a new payment.
+        vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now()).ifPresent(sub -> {
             throw new RuntimeException(
                     "You already have an active VIP subscription expiring at " + sub.getExpiresAt());
         });
@@ -80,15 +76,12 @@ public class PaystackService {
         VipPrice vipPrice = vipPriceRepo.findByActiveTrue()
                 .orElseThrow(() -> new RuntimeException("VIP price not configured yet"));
 
-        double baseAmount    = vipPrice.getPrice();       // e.g. 10.00
-        String baseCurrency  = vipPrice.getCurrency();    // e.g. "USD"
+        double baseAmount   = vipPrice.getPrice();
+        String baseCurrency = vipPrice.getCurrency();
 
-        // Live cross-conversion: USD → GHS / NGN / USD
-        double chargeAmount  = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
-        double displayRate   = currencyConverter.getRate(baseCurrency, userCurrency);
-
-        // Paystack expects the amount in the smallest unit (pesewas / kobo / cents)
-        int amountSmallestUnit = (int) Math.round(chargeAmount * 100);
+        double chargeAmount      = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
+        double displayRate       = currencyConverter.getRate(baseCurrency, userCurrency);
+        int amountSmallestUnit   = (int) Math.round(chargeAmount * 100);
 
         log.info("💱 Price conversion: {} {} → {} {}  (rate: 1 {} = {} {})",
                 baseAmount, baseCurrency,
@@ -106,15 +99,15 @@ public class PaystackService {
         paystackBody.put("reference",    reference);
         paystackBody.put("callback_url", callbackUrl);
         paystackBody.put("metadata", Map.of(
-                "userId",           user.getId().toString(),
-                "purpose",          "VIP_SUBSCRIPTION",
-                "userName",         user.getFullName(),
-                "baseCurrency",     baseCurrency,
-                "baseAmount",       baseAmount,
-                "userCurrency",     userCurrency,
-                "chargeAmount",     chargeAmount,
-                "exchangeRate",     displayRate,
-                "clientIp",         clientIp != null ? clientIp : "unknown"
+                "userId",       user.getId().toString(),
+                "purpose",      "VIP_SUBSCRIPTION",
+                "userName",     user.getFullName(),
+                "baseCurrency", baseCurrency,
+                "baseAmount",   baseAmount,
+                "userCurrency", userCurrency,
+                "chargeAmount", chargeAmount,
+                "exchangeRate", displayRate,
+                "clientIp",     clientIp != null ? clientIp : "unknown"
         ));
 
         HttpHeaders headers = buildHeaders();
@@ -177,20 +170,24 @@ public class PaystackService {
 
     public PaymentVerificationResponse verifyPayment(String reference) {
 
-        // Idempotency: already verified — return cached result
+        // Idempotency: already verified — return cached result.
+        // FIX: Also use the expiry-aware query here so the cached response
+        // reflects whether the subscription is still actually valid.
         Optional<Payment> existingOpt = paymentRepo.findByReference(reference);
         if (existingOpt.isPresent()
                 && existingOpt.get().getStatus() == PaymentStatus.SUCCESS) {
             log.info("⏩ Payment {} already verified — returning cached result", reference);
             User user = existingOpt.get().getUser();
-            Optional<VipSubscription> sub = vipSubscriptionRepo.findByUserAndActiveTrue(user);
+            // FIX: was findByUserAndActiveTrue — now checks expiry too
+            Optional<VipSubscription> sub =
+                    vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now());
             return PaymentVerificationResponse.builder()
                     .reference(reference)
                     .status("success")
                     .amount(existingOpt.get().getAmount())
                     .currency(existingOpt.get().getCurrency())
-                    .message("VIP already active.")
-                    .vipActivated(true)
+                    .message(sub.isPresent() ? "VIP already active." : "VIP subscription has expired.")
+                    .vipActivated(sub.isPresent())
                     .vipExpiresAt(sub.map(VipSubscription::getExpiresAt).orElse(null))
                     .build();
         }
@@ -281,7 +278,6 @@ public class PaystackService {
             Map<String, Object> data = (Map<String, Object>) payload.get("data");
             String reference = (String) data.get("reference");
 
-            // Idempotency check
             if (paymentRepo.existsByReferenceAndStatus(reference, PaymentStatus.SUCCESS)) {
                 log.info("⏩ Webhook: {} already processed — skipping", reference);
                 return;
@@ -302,11 +298,9 @@ public class PaystackService {
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * Returns the VIP price converted to the user's local currency (detected from IP).
-     * Also returns all three Paystack options so the frontend can show a currency switcher.
-     *
-     * @param clientIp        user's real IP (from controller via ipCurrencyResolver.extractIp)
-     * @param currencyOverride optional manual override ("GHS", "NGN", "USD")
+     * Returns the VIP price converted to the user's local currency.
+     * Admin changing the price has zero effect on this — it only affects
+     * what new subscribers will be charged going forward.
      */
     public Map<String, Object> getVipPriceForUser(String clientIp, String currencyOverride) {
         VipPrice price = vipPriceRepo.findByActiveTrue()
@@ -315,14 +309,12 @@ public class PaystackService {
         double baseAmount   = price.getPrice();
         String baseCurrency = price.getCurrency();
 
-        // Detect user's currency
         String userCurrency = ipCurrencyResolver
                 .resolveCurrencyWithOverride(clientIp, currencyOverride);
 
-        double userPrice    = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
-        double displayRate  = currencyConverter.getRate(baseCurrency, userCurrency);
+        double userPrice   = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
+        double displayRate = currencyConverter.getRate(baseCurrency, userCurrency);
 
-        // Pre-compute all three Paystack currency options
         List<Map<String, Object>> options = IpCurrencyResolver.PAYSTACK_CURRENCIES
                 .stream()
                 .map(cur -> {
@@ -337,13 +329,13 @@ public class PaystackService {
                 .collect(Collectors.toList());
 
         Map<String, Object> result = new HashMap<>();
-        result.put("baseCurrency",  baseCurrency);          // admin's currency, e.g. "USD"
-        result.put("basePrice",     baseAmount);             // admin's price, e.g. 10.00
-        result.put("userCurrency",  userCurrency);           // auto-detected, e.g. "GHS"
-        result.put("userPrice",     userPrice);              // converted price for user
-        result.put("exchangeRate",  displayRate);            // 1 baseCurrency = X userCurrency
-        result.put("description",   price.getDescription());
-        result.put("options",       options);                // all three currency options
+        result.put("baseCurrency", baseCurrency);
+        result.put("basePrice",    baseAmount);
+        result.put("userCurrency", userCurrency);
+        result.put("userPrice",    userPrice);
+        result.put("exchangeRate", displayRate);
+        result.put("description",  price.getDescription());
+        result.put("options",      options);
 
         log.info("💰 VIP price served — IP: {}, currency: {}, price: {} {}",
                 clientIp, userCurrency, userPrice, userCurrency);
@@ -353,12 +345,23 @@ public class PaystackService {
 
     /**
      * Returns the current user's VIP subscription status.
+     *
+     * FIX: Was using findByUserAndActiveTrue() which trusted the active flag
+     * alone. Now uses findActiveAndNotExpired() so a subscription whose
+     * expiresAt has passed — but whose active flag hasn't been reset by the
+     * scheduler yet — correctly returns isVip=false.
+     *
+     * This means the admin changing the VIP price mid-subscription has zero
+     * effect on an existing subscriber's status, because the subscription is
+     * validated against its own expiresAt timestamp, not the price table.
      */
     public Map<String, Object> getVipStatus(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        Optional<VipSubscription> sub = vipSubscriptionRepo.findByUserAndActiveTrue(user);
+        // FIX: was findByUserAndActiveTrue — now checks expiry too
+        Optional<VipSubscription> sub =
+                vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now());
 
         Map<String, Object> status = new HashMap<>();
         status.put("isVip", sub.isPresent());
@@ -400,13 +403,19 @@ public class PaystackService {
 
     /**
      * Activates (or renews) the user's VIP for 24 hours.
+     *
+     * FIX: Was using findByUserAndActiveTrue() which could find an expired
+     * subscription (active=true, expiresAt in the past) and update it instead
+     * of creating a new record. Now uses findActiveAndNotExpired() so only
+     * a genuinely live subscription is reused; otherwise a fresh one is created.
      */
     private LocalDateTime activateVip(User user) {
         LocalDateTime now       = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusHours(24);
 
+        // FIX: was findByUserAndActiveTrue — now checks expiry too
         VipSubscription subscription = vipSubscriptionRepo
-                .findByUserAndActiveTrue(user)
+                .findActiveAndNotExpired(user, now)
                 .orElse(VipSubscription.builder().user(user).build());
 
         subscription.setActivatedAt(now);

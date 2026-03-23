@@ -31,6 +31,13 @@ public class AdminDashboardService {
 
     // ── VIP Price ─────────────────────────────────────────────────
 
+    /**
+     * Sets a new active VIP price.
+     *
+     * This only affects future payments — it has no effect on existing
+     * VipSubscription records. A subscriber who paid at the old price keeps
+     * their subscription until expiresAt, regardless of price changes.
+     */
     public VipPriceResponse setVipPrice(SetVipPriceRequest request) {
         String currency = request.getCurrency().toUpperCase();
         if (!CurrencyConverter.SUPPORTED_BASE_CURRENCIES.contains(currency)) {
@@ -120,7 +127,6 @@ public class AdminDashboardService {
 
     /**
      * ADMIN — returns ALL promos (upcoming + active + expired).
-     * This is what the admin dashboard displays.
      */
     public List<PromoResponse> getAllPromos() {
         return promoRepo.findAllPromos()
@@ -129,7 +135,6 @@ public class AdminDashboardService {
 
     /**
      * PUBLIC — returns only currently active promos (date window check).
-     * This is what the user-facing app displays.
      */
     public List<PromoResponse> getActivePromos() {
         return promoRepo.findActivePromos(LocalDateTime.now())
@@ -171,9 +176,21 @@ public class AdminDashboardService {
 
     // ── Dashboard stats ───────────────────────────────────────────
 
+    /**
+     * FIX: Was using countByActiveTrue() which counted subscriptions where
+     * active=true regardless of whether expiresAt had already passed. This
+     * inflated the "active VIP users" number on the admin dashboard — a user
+     * whose 24-hour window expired yesterday would still be counted until the
+     * scheduler ran.
+     *
+     * Now uses countActiveAndNotExpired(now) which checks both conditions:
+     * active=true AND expiresAt > now. The count is always accurate in
+     * real-time, independent of when the scheduler last ran.
+     */
     public DashboardStatsResponse getDashboardStats() {
         long totalUsers = userRepo.count();
-        long activeVip  = vipSubscriptionRepo.countByActiveTrue();
+        // FIX: was countByActiveTrue() — now checks expiry in the same query
+        long activeVip  = vipSubscriptionRepo.countActiveAndNotExpired(LocalDateTime.now());
         return DashboardStatsResponse.builder()
                 .totalUsers(totalUsers)
                 .activeVipUsers(activeVip)
