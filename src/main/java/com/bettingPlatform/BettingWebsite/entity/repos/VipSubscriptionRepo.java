@@ -13,59 +13,41 @@ import java.util.UUID;
 
 public interface VipSubscriptionRepo extends JpaRepository<VipSubscription, UUID> {
 
-    @Query("SELECT v FROM VipSubscription v WHERE v.active = true " +
-           "AND v.expiresAt < :now")
-    List<VipSubscription> findExpiredSubscriptions(LocalDateTime now);
-
-    @Deprecated
-    Optional<VipSubscription> findByUserAndActiveTrue(User user);
-
     /**
-     * @deprecated Use {@link #countActiveAndNotExpired(LocalDateTime)} instead.
-     *             This query does not validate expiresAt and inflates VIP counts.
-     */
-    @Deprecated
-    long countByActiveTrue();
-
-
-    // ── CORRECT — expiry-aware queries (use these everywhere) ────────────────
-
-    /**
-     * Returns the user's subscription only if it is both active=true AND
-     * expiresAt is still in the future. This is the single source of truth
-     * for whether a user currently has a valid VIP subscription.
+     * Primary VIP status check — used everywhere in PaystackService and
+     * AdminDashboardService in place of the old findByUserAndActiveTrue().
      *
-     * Replaces: findByUserAndActiveTrue(user)
+     * Validates BOTH conditions: active=true AND expiresAt > now.
+     * This means:
+     *   - Admin price changes have zero effect on active subscribers
+     *   - A subscription whose 24h window has passed is never treated as valid
+     *     even if the scheduler hasn't flipped its active flag yet
      */
-    @Query("SELECT v FROM VipSubscription v " +
-            "WHERE v.user = :user " +
-            "AND v.active = true " +
-            "AND v.expiresAt > :now")
-    Optional<VipSubscription> findActiveAndNotExpired(
-            @Param("user") User user,
-            @Param("now")  LocalDateTime now);
+    @Query("SELECT s FROM VipSubscription s WHERE s.user = :user AND s.active = true AND s.expiresAt > :now")
+    Optional<VipSubscription> findActiveAndNotExpired(@Param("user") User user,
+                                                      @Param("now") LocalDateTime now);
 
     /**
-     * Returns all subscriptions where active=true but expiresAt is in the past.
-     * Used by the scheduler to batch-expire stale records.
+     * Real-time VIP user count for the admin dashboard.
+     * Replaces countByActiveTrue() which inflated the count by including
+     * subscriptions whose expiresAt had already passed but whose active
+     * flag hadn't been reset by the scheduler yet.
      */
-    @Query("SELECT v FROM VipSubscription v " +
-            "WHERE v.active = true " +
-            "AND v.expiresAt <= :now")
-    List<VipSubscription> findExpiredButStillActive(@Param("now") LocalDateTime now);
-
-    /**
-     * Counts only subscriptions that are both active=true AND not yet expired.
-     * Use this for dashboard stats instead of countByActiveTrue().
-     */
-    @Query("SELECT COUNT(v) FROM VipSubscription v " +
-            "WHERE v.active = true " +
-            "AND v.expiresAt > :now")
+    @Query("SELECT COUNT(s) FROM VipSubscription s WHERE s.active = true AND s.expiresAt > :now")
     long countActiveAndNotExpired(@Param("now") LocalDateTime now);
 
     /**
-     * Used by the webhook idempotency check in PaystackService.handleWebhook().
-     * This remains unchanged — it checks payment records, not subscriptions.
+     * Used by VipExpiryScheduler (runs every 10 minutes).
+     * Finds subscriptions where active=true but expiresAt is in the past
+     * so the scheduler can flip them to active=false.
+     */
+    @Query("SELECT s FROM VipSubscription s WHERE s.active = true AND s.expiresAt <= :now")
+    List<VipSubscription> findExpiredButStillActive(@Param("now") LocalDateTime now);
+
+    /**
+     * Used by PaystackService.handleWebhook() to guard against double-activation
+     * if existsByReferenceAndStatus is not available on PaymentRepo.
+     * Keep this if anything in your codebase still calls it directly.
      */
     boolean existsByUserAndActiveTrue(User user);
 }

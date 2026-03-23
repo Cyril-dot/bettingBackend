@@ -54,8 +54,9 @@ public class SecurityConfig {
                                 "/test/**",
                                 "/api/booking/**",
                                 "/api/v1/public/**",
-                                "/api/v1/payment/webhook"   // ← ADD THIS LINE
+                                "/api/v1/payment/webhook"
                         ).permitAll()
+                        .requestMatchers("/api/v1/payment/webhook").permitAll()
                         .anyRequest().authenticated()
                 )
 

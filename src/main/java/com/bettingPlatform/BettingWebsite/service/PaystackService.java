@@ -42,53 +42,40 @@ public class PaystackService {
     // STEP 1 — User initiates payment
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * @param userPrincipal     authenticated user
-     * @param clientIp          raw IP extracted from the HTTP request (from controller)
-     * @param currencyOverride  optional manual currency override from frontend (nullable)
-     *                          Must be "GHS", "NGN", or "USD" — ignored if invalid
-     */
     public InitiatePaymentResponse initiatePayment(UserPrincipal userPrincipal,
                                                    String clientIp,
                                                    String currencyOverride) {
 
-        // ── 1. Resolve user's currency ────────────────────────────────────────
         String userCurrency = ipCurrencyResolver
                 .resolveCurrencyWithOverride(clientIp, currencyOverride);
 
         log.info("💳 Payment init — IP: {}, detected currency: {}, override: {}",
                 clientIp, userCurrency, currencyOverride);
 
-        // ── 2. Load user ──────────────────────────────────────────────────────
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // FIX: Block only if the user has an active, non-expired subscription.
-        // Previously used findByUserAndActiveTrue() which trusted the active flag
-        // alone — that flag is only reset by the scheduler, so a subscription
-        // whose expiresAt had passed could still block a new payment.
+        // Block only if the user has an active, non-expired subscription.
         vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now()).ifPresent(sub -> {
             throw new RuntimeException(
                     "You already have an active VIP subscription expiring at " + sub.getExpiresAt());
         });
 
-        // ── 3. Load admin price + convert to user's currency ──────────────────
         VipPrice vipPrice = vipPriceRepo.findByActiveTrue()
                 .orElseThrow(() -> new RuntimeException("VIP price not configured yet"));
 
         double baseAmount   = vipPrice.getPrice();
         String baseCurrency = vipPrice.getCurrency();
 
-        double chargeAmount      = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
-        double displayRate       = currencyConverter.getRate(baseCurrency, userCurrency);
-        int amountSmallestUnit   = (int) Math.round(chargeAmount * 100);
+        double chargeAmount    = currencyConverter.convert(baseAmount, baseCurrency, userCurrency);
+        double displayRate     = currencyConverter.getRate(baseCurrency, userCurrency);
+        int amountSmallestUnit = (int) Math.round(chargeAmount * 100);
 
         log.info("💱 Price conversion: {} {} → {} {}  (rate: 1 {} = {} {})",
                 baseAmount, baseCurrency,
                 chargeAmount, userCurrency,
                 baseCurrency, displayRate, userCurrency);
 
-        // ── 4. Build reference + Paystack payload ─────────────────────────────
         String reference = "VIP_" + UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 16).toUpperCase();
 
@@ -113,7 +100,6 @@ public class PaystackService {
         HttpHeaders headers = buildHeaders();
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(paystackBody, headers);
 
-        // ── 5. Call Paystack + save Payment record ────────────────────────────
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(
                     paystackBaseUrl + "/transaction/initialize", entity, Map.class);
@@ -165,20 +151,17 @@ public class PaystackService {
 
 
     // ════════════════════════════════════════════════════════════════
-    // STEP 2 — Verify payment after Paystack redirects user back
+    // STEP 2 — Verify payment (called by frontend redirect OR webhook)
     // ════════════════════════════════════════════════════════════════
 
     public PaymentVerificationResponse verifyPayment(String reference) {
 
         // Idempotency: already verified — return cached result.
-        // FIX: Also use the expiry-aware query here so the cached response
-        // reflects whether the subscription is still actually valid.
         Optional<Payment> existingOpt = paymentRepo.findByReference(reference);
         if (existingOpt.isPresent()
                 && existingOpt.get().getStatus() == PaymentStatus.SUCCESS) {
             log.info("⏩ Payment {} already verified — returning cached result", reference);
             User user = existingOpt.get().getUser();
-            // FIX: was findByUserAndActiveTrue — now checks expiry too
             Optional<VipSubscription> sub =
                     vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now());
             return PaymentVerificationResponse.builder()
@@ -263,10 +246,24 @@ public class PaystackService {
 
     // ════════════════════════════════════════════════════════════════
     // STEP 3 — Paystack Webhook (charge.success)
+    //
+    // FIX: The old isValidSignature() re-serialised the Map payload with
+    // Jackson, which does NOT guarantee key ordering. Paystack signs the
+    // raw request body string, so a re-serialised map produces a different
+    // HMAC and the check always fails, silently dropping webhooks.
+    //
+    // The controller must now read the raw body as a String, pass it here
+    // for signature validation, AND separately parse it into the Map.
+    // See PaystackWebhookController for the updated controller code.
     // ════════════════════════════════════════════════════════════════
 
-    public void handleWebhook(Map<String, Object> payload, String signature) {
-        if (!isValidSignature(payload, signature)) {
+    /**
+     * @param payload      parsed webhook body (used for event routing only)
+     * @param rawBody      the exact bytes Paystack sent — used for HMAC validation
+     * @param signature    value of the X-Paystack-Signature header
+     */
+    public void handleWebhook(Map<String, Object> payload, String rawBody, String signature) {
+        if (!isValidSignature(rawBody, signature)) {
             log.warn("⚠️ Invalid Paystack webhook signature — rejecting");
             throw new RuntimeException("Invalid webhook signature");
         }
@@ -297,11 +294,6 @@ public class PaystackService {
     // PUBLIC QUERIES
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * Returns the VIP price converted to the user's local currency.
-     * Admin changing the price has zero effect on this — it only affects
-     * what new subscribers will be charged going forward.
-     */
     public Map<String, Object> getVipPriceForUser(String clientIp, String currencyOverride) {
         VipPrice price = vipPriceRepo.findByActiveTrue()
                 .orElseThrow(() -> new RuntimeException("VIP price not configured"));
@@ -344,22 +336,14 @@ public class PaystackService {
     }
 
     /**
-     * Returns the current user's VIP subscription status.
-     *
-     * FIX: Was using findByUserAndActiveTrue() which trusted the active flag
-     * alone. Now uses findActiveAndNotExpired() so a subscription whose
-     * expiresAt has passed — but whose active flag hasn't been reset by the
-     * scheduler yet — correctly returns isVip=false.
-     *
-     * This means the admin changing the VIP price mid-subscription has zero
-     * effect on an existing subscriber's status, because the subscription is
-     * validated against its own expiresAt timestamp, not the price table.
+     * FIX: Uses findActiveAndNotExpired() so VIP status is always evaluated
+     * against the subscription's own expiresAt, never the VipPrice table.
+     * Admin changing the price has zero effect on current subscribers.
      */
     public Map<String, Object> getVipStatus(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // FIX: was findByUserAndActiveTrue — now checks expiry too
         Optional<VipSubscription> sub =
                 vipSubscriptionRepo.findActiveAndNotExpired(user, LocalDateTime.now());
 
@@ -383,9 +367,6 @@ public class PaystackService {
         return status;
     }
 
-    /**
-     * Returns the authenticated user's payment history.
-     */
     public List<PaymentHistoryResponse> getPaymentHistory(UserPrincipal userPrincipal) {
         User user = userRepo.findById(userPrincipal.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -401,19 +382,10 @@ public class PaystackService {
     // PRIVATE HELPERS
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * Activates (or renews) the user's VIP for 24 hours.
-     *
-     * FIX: Was using findByUserAndActiveTrue() which could find an expired
-     * subscription (active=true, expiresAt in the past) and update it instead
-     * of creating a new record. Now uses findActiveAndNotExpired() so only
-     * a genuinely live subscription is reused; otherwise a fresh one is created.
-     */
     private LocalDateTime activateVip(User user) {
         LocalDateTime now       = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusHours(24);
 
-        // FIX: was findByUserAndActiveTrue — now checks expiry too
         VipSubscription subscription = vipSubscriptionRepo
                 .findActiveAndNotExpired(user, now)
                 .orElse(VipSubscription.builder().user(user).build());
@@ -434,20 +406,32 @@ public class PaystackService {
         return headers;
     }
 
-    private boolean isValidSignature(Map<String, Object> payload, String signature) {
+    /**
+     * FIX: Validates against rawBody — the exact string Paystack signed.
+     *
+     * The old version called ObjectMapper.writeValueAsString(payload) on the
+     * already-parsed Map, which reorders keys and produces a different HMAC
+     * than what Paystack computed over the original payload bytes.
+     * Passing the raw body string from the controller fixes this permanently.
+     */
+    private boolean isValidSignature(String rawBody, String signature) {
         try {
-            String payloadString = new com.fasterxml.jackson.databind
-                    .ObjectMapper().writeValueAsString(payload);
-
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA512");
             mac.init(new javax.crypto.spec.SecretKeySpec(
-                    paystackSecretKey.getBytes(), "HmacSHA512"));
+                    paystackSecretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "HmacSHA512"));
 
-            byte[] hashBytes = mac.doFinal(payloadString.getBytes());
+            byte[] hashBytes = mac.doFinal(
+                    rawBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
             StringBuilder hexHash = new StringBuilder();
             for (byte b : hashBytes) hexHash.append(String.format("%02x", b));
 
-            return hexHash.toString().equals(signature);
+            boolean valid = hexHash.toString().equals(signature);
+            if (!valid) {
+                log.warn("⚠️ HMAC mismatch — computed: {}, received: {}", hexHash, signature);
+            }
+            return valid;
         } catch (Exception e) {
             log.error("❌ Signature validation error: {}", e.getMessage());
             return false;

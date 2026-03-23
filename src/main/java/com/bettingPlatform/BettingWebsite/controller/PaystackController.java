@@ -4,6 +4,7 @@ import com.bettingPlatform.BettingWebsite.Config.Security.UserPrincipal;
 import com.bettingPlatform.BettingWebsite.dto.*;
 import com.bettingPlatform.BettingWebsite.service.IpCurrencyResolver;
 import com.bettingPlatform.BettingWebsite.service.PaystackService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +35,8 @@ import java.util.Map;
 public class PaystackController {
 
     private final PaystackService     paystackService;
-    private final IpCurrencyResolver  ipCurrencyResolver;  // ← IP → currency detection
+    private final IpCurrencyResolver  ipCurrencyResolver;
+    private final ObjectMapper        objectMapper;
 
 
     // ─────────────────────────────────────────────────────────────
@@ -45,27 +47,8 @@ public class PaystackController {
      * GET /api/v1/payment/vip/price
      * GET /api/v1/payment/vip/price?currency=NGN   ← user manually overrides currency
      *
-     * Called by the frontend BEFORE showing the payment screen.
-     * Detects the user's country from their IP and returns the VIP price
-     * already converted to their local currency (GHS, NGN, or USD).
-     *
-     * Also returns all three currency options so the frontend can render
-     * a currency switcher if desired.
-     *
-     * Response shape:
-     * {
-     *   "baseCurrency":  "USD",
-     *   "basePrice":     10.00,
-     *   "userCurrency":  "GHS",
-     *   "userPrice":     155.00,
-     *   "exchangeRate":  15.5,
-     *   "description":   "24-hour VIP access",
-     *   "options": [
-     *     { "currency": "GHS", "price": 155.00,   "label": "Pay in Ghana Cedis (GHS)",    "selected": true  },
-     *     { "currency": "NGN", "price": 16000.00, "label": "Pay in Nigerian Naira (NGN)", "selected": false },
-     *     { "currency": "USD", "price": 10.00,    "label": "Pay in US Dollars (USD)",     "selected": false }
-     *   ]
-     * }
+     * Returns the VIP price converted to the user's detected (or chosen) currency,
+     * plus all three currency options so the UI can render a currency switcher.
      */
     @GetMapping("/vip/price")
     @PreAuthorize("hasRole('USER')")
@@ -120,9 +103,6 @@ public class PaystackController {
      *
      * If the body is absent or the currency field is null/invalid,
      * the IP-detected currency is used.
-     *
-     * The service converts the admin's base price to the user's currency
-     * using live exchange rates, then initializes the Paystack transaction.
      */
     @PostMapping("/initiate")
     @PreAuthorize("hasRole('USER')")
@@ -172,8 +152,10 @@ public class PaystackController {
 
     /**
      * GET /api/v1/payment/verify/{reference}
+     *
      * Called after user returns from Paystack redirect.
      * Verifies the transaction with Paystack and activates VIP if successful.
+     * Idempotent — safe to call multiple times for the same reference.
      */
     @GetMapping("/verify/{reference}")
     @PreAuthorize("hasRole('USER')")
@@ -220,34 +202,53 @@ public class PaystackController {
 
     /**
      * POST /api/v1/payment/webhook
+     *
      * Paystack server-to-server event notification.
-     * Must be excluded from Spring Security auth filter.
-     * Signature is validated inside the service using HMAC-SHA512.
-     * Always returns 200 — Paystack retries on any non-200 response.
+     * Must be excluded from Spring Security auth filter (permit this URL).
+     *
+     * FIX: Previously accepted @RequestBody Map<String,Object> payload.
+     * Spring/Jackson parses the JSON into a Map and does NOT preserve key
+     * insertion order. Re-serialising that Map to compute the HMAC produces
+     * a different string than what Paystack signed over the raw bytes —
+     * so the signature check always failed and every webhook was silently
+     * dropped. Money was taken but VIP was never activated via this path.
+     *
+     * The fix: accept @RequestBody String rawBody (Spring binds the raw
+     * request bytes as-is), validate the HMAC against that exact string,
+     * then parse it ourselves with ObjectMapper for event routing.
+     *
+     * Always returns HTTP 200 — Paystack retries on any non-200 response,
+     * which would cause duplicate activations.
      */
     @PostMapping("/webhook")
     public ResponseEntity<Void> handleWebhook(
-            @RequestBody Map<String, Object> payload,
+            @RequestBody String rawBody,
             @RequestHeader("x-paystack-signature") String signature) {
 
-        String event = payload.get("event") != null
-                ? payload.get("event").toString() : "unknown";
-
-        log.info("[PAYMENT][WEBHOOK] Received → event={}", event);
-
+        String event = "unknown";
         try {
-            paystackService.handleWebhook(payload, signature);
+            // Parse only for logging/routing — HMAC uses rawBody, not this map
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = objectMapper.readValue(rawBody, Map.class);
+            event = payload.get("event") != null ? payload.get("event").toString() : "unknown";
+
+            log.info("[PAYMENT][WEBHOOK] Received → event={}", event);
+
+            // Pass rawBody for HMAC validation, payload for event routing
+            paystackService.handleWebhook(payload, rawBody, signature);
+
             log.info("[PAYMENT][WEBHOOK] Processed successfully → event={}", event);
-            return ResponseEntity.ok().build();
 
         } catch (RuntimeException e) {
+            // Signature invalid or business logic rejection — log and swallow
             log.warn("[PAYMENT][WEBHOOK] Rejected → event={} reason={}", event, e.getMessage());
-            return ResponseEntity.ok().build(); // Always 200 to prevent Paystack retries
 
         } catch (Exception e) {
             log.error("[PAYMENT][WEBHOOK] Unexpected error → event={} reason={}", event, e.getMessage(), e);
-            return ResponseEntity.ok().build();
         }
+
+        // Always 200 — never let Paystack retry (idempotency guard is in the service)
+        return ResponseEntity.ok().build();
     }
 
 
@@ -257,7 +258,9 @@ public class PaystackController {
 
     /**
      * GET /api/v1/payment/vip/status
+     *
      * Returns current VIP subscription status, hours remaining, and base price info.
+     * Uses expiry-aware query — accurate even if the scheduler hasn't run yet.
      */
     @GetMapping("/vip/status")
     @PreAuthorize("hasRole('USER')")
