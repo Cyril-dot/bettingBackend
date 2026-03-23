@@ -51,8 +51,10 @@ public class RateLimitingService {
             case ADMIN -> properties.getAdminLimit();
         };
 
-        Refill refill = Refill.greedy(capacity, Duration.ofSeconds(properties.getRefillSeconds()));
-        Bandwidth limit = Bandwidth.classic(capacity, refill);
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(capacity)
+                .refillGreedy(capacity, Duration.ofSeconds(properties.getRefillSeconds()))
+                .build();
         return Bucket.builder().addLimit(limit).build();
     }
 

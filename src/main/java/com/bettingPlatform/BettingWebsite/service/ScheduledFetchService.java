@@ -299,7 +299,7 @@ public class ScheduledFetchService {
     @Scheduled(fixedRate = 3600000)
     public void expireVipSubscriptions() {
         List<VipSubscription> expired = vipSubscriptionRepo
-                .findExpiredSubscriptions(LocalDateTime.now());
+                .findExpiredButStillActive(LocalDateTime.now());
         if (expired.isEmpty()) return;
         expired.forEach(sub -> {
             sub.setActive(false);
