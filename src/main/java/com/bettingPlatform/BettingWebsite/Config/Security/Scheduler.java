@@ -16,13 +16,13 @@ public class Scheduler {
     private final RestTemplate restTemplate = new RestTemplate();
     private final JdbcTemplate jdbcTemplate;
 
-    private static final String RENDER_URL = "https://bettingbackend-y3ck.onrender.com";
+    private static final String RENDER_URL = "https://bettingbackend-y3ck.onrender.com/ping";
 
     public Scheduler(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // Ping every 5 minutes (300,000 ms)
+    // Ping every 30 seconds (30,000 ms)
     @Scheduled(fixedRate = 30000)
     public void keepAlive() {
         pingRender();
