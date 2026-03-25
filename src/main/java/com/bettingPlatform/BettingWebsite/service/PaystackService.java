@@ -377,7 +377,7 @@ public class PaystackService {
 
     private LocalDateTime activateVip(User user) {
         LocalDateTime now       = LocalDateTime.now();
-        LocalDateTime expiresAt = now.plusHours(24);
+        LocalDateTime expiresAt = now.toLocalDate().plusDays(1).atStartOfDay(); // expires at 12:00 AM next day
 
         // FIX: always look up the existing row by user (ignoring active/expiry status)
         // so we UPDATE it rather than INSERT a new one — the DB has a unique constraint
